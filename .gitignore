@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Environment variables
+.env
+.env.*
+
+# Database (user-specific prediction history)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+ui_server.log
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/
+*.pytest_tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Static build artifacts
+static/dist/
+static/*.min.js
+static/*.min.css
