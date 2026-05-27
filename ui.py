@@ -220,7 +220,8 @@ def _race_payload(r):
 def get_races():
     races = api.get_upcoming_races()
     if not races:
-        races = api.get_schedule()
+        today = datetime.today().date().isoformat()
+        races = [r for r in api.get_schedule() if r.get("date", "") >= today]
     return jsonify([_race_payload(r) for r in races])
 
 
