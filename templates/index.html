@@ -8,6 +8,8 @@
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/three@0.134.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.134.0/examples/js/controls/OrbitControls.js"></script>
 <style>
   :root {
     --bg:       #0a0a0f;
@@ -32,6 +34,8 @@
     --rb:           #6692ff;
     --sauber:       #52e252;
     --haas:         #b6babd;
+    --audi:         #c8c8c8;
+    --cadillac:     #1a5fb4;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -118,9 +122,10 @@
     font-size: 9px; letter-spacing: 1.5px; padding: 2px 6px; border-radius: 2px;
     text-transform: uppercase; font-weight: 700;
   }
-  .db-pace-qualifying { background: rgba(0,144,208,.15); color: var(--blue); border: 1px solid rgba(0,144,208,.3); }
-  .db-pace-live       { background: rgba(0,200,117,.12); color: var(--green); border: 1px solid rgba(0,200,117,.3); }
-  .db-pace-championship { background: rgba(107,107,133,.15); color: var(--muted); border: 1px solid var(--border); }
+  .db-pace-qualifying   { background: rgba(0,144,208,.15);  color: var(--blue);   border: 1px solid rgba(0,144,208,.3); }
+  .db-pace-live         { background: rgba(0,200,117,.12);  color: var(--green);  border: 1px solid rgba(0,200,117,.3); }
+  .db-pace-championship { background: rgba(107,107,133,.15);color: var(--muted);  border: 1px solid var(--border); }
+  .db-pace-quali_form   { background: rgba(245,197,24,.12); color: #f5c518;       border: 1px solid rgba(245,197,24,.3); }
   .db-delete-btn {
     background: none; border: 1px solid var(--border); color: var(--muted);
     font-family: inherit; font-size: 10px; padding: 3px 8px; cursor: pointer;
@@ -887,11 +892,388 @@
   .leaflet-control-zoom a { background:var(--card)!important; color:var(--text)!important; border-color:var(--border)!important; }
   .leaflet-control-attribution { background:rgba(10,10,15,.7)!important; color:var(--muted)!important; font-size:9px!important; }
   .leaflet-control-attribution a { color:var(--muted)!important; }
+  .leaflet-container { background: #0a0a0f !important; }
+
+  /* ── Globe Page ──────────────────────────────────────── */
+  #globePage { padding:20px; box-sizing:border-box; }
+  .globe-layout {
+    display: grid;
+    grid-template-columns: 1fr 348px;
+    gap: 14px;
+    height: calc(100vh - 108px);
+  }
+  .globe-canvas-wrap {
+    position: relative;
+    background: #060b12;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .globe-canvas-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+  .globe-canvas-title {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text);
+    font-family: monospace;
+  }
+  .globe-legend {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    font-family: monospace;
+  }
+  .globe-legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 5px;
+    vertical-align: middle;
+  }
+  #globe3DCanvas {
+    display: block;
+    width: 100%;
+    flex: 1;
+    cursor: grab;
+  }
+  #globe3DCanvas:active { cursor: grabbing; }
+  .globe-hint {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    letter-spacing: 1.8px;
+    color: var(--muted);
+    font-family: monospace;
+    pointer-events: none;
+    opacity: 0.6;
+  }
+  .globe-stats-strip {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(6,11,18,.82);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    font-size: 9px;
+    letter-spacing: 1.8px;
+    color: var(--muted);
+    font-family: monospace;
+    pointer-events: none;
+  }
+  .gss-num { font-weight: 700; color: var(--text); }
+  .gss-sep { color: var(--border); margin: 0 2px; }
+
+  /* Globe tooltip */
+  #globeTooltip {
+    position: fixed;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 6px 10px;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: var(--text);
+    font-family: monospace;
+    pointer-events: none;
+    z-index: 900;
+    display: none;
+    white-space: nowrap;
+    box-shadow: 0 4px 18px rgba(0,0,0,.6);
+  }
+  .gt-country { font-size: 9px; color: var(--muted); margin-top: 2px; letter-spacing: 1.2px; }
+
+  /* Globe detail panel */
+  .globe-detail-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .gdp-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .gdp-round { font-size: 9px; letter-spacing: 2px; color: var(--muted); margin-bottom: 4px; }
+  .gdp-name  { font-size: 13px; letter-spacing: 1.5px; color: var(--text); font-weight: 700; line-height: 1.3; }
+  .gdp-country { font-size: 10px; letter-spacing: 1.5px; color: var(--muted); margin-top: 3px; }
+  .gdp-svg-wrap {
+    height: 110px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 20px;
+    flex-shrink: 0;
+  }
+  .gdp-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .gdp-stat-cell {
+    padding: 10px 14px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .gdp-stat-cell:nth-child(even) { border-right: none; }
+  .gdp-stat-label { font-size: 8px; letter-spacing: 1.8px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .gdp-stat-val   { font-size: 13px; letter-spacing: 1px; color: var(--text); font-weight: 700; }
+  .gdp-stat-unit  { font-size: 9px; color: var(--muted); margin-left: 2px; }
+  .gdp-bar-wrap   { display: flex; gap: 2px; margin-top: 4px; }
+  .gdp-bar-pip {
+    width: 10px; height: 5px;
+    background: var(--border);
+    border-radius: 1px;
+    transition: background .2s;
+  }
+  .gdp-bar-pip.on  { background: var(--accent); }
+  .gdp-bar-pip.on-g{ background: var(--green); }
+  .gdp-sc-row {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .gdp-sc-label  { font-size: 8px; letter-spacing: 1.8px; color: var(--muted); margin-bottom: 5px; }
+  .gdp-sc-bar    { height: 5px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .gdp-sc-fill   { height: 100%; background: var(--accent); border-radius: 2px; transition: width .4s; }
+  .gdp-sc-pct    { font-size: 10px; letter-spacing: 1px; color: var(--text); font-weight: 700; margin-top: 4px; }
+  .gdp-compounds {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .gdp-comp-label { font-size: 8px; letter-spacing: 1.8px; color: var(--muted); margin-right: 4px; }
+  .gdp-notes {
+    padding: 12px 14px;
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.7;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    flex: 1;
+  }
+  .gdp-actions {
+    padding: 12px 14px;
+    display: flex;
+    gap: 8px;
+  }
+  .gdp-btn {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: monospace;
+    font-size: 9px;
+    letter-spacing: 1.8px;
+    padding: 8px 6px;
+    cursor: pointer;
+    text-transform: uppercase;
+    border-radius: 2px;
+    transition: all .15s;
+  }
+  .gdp-btn:hover { color: var(--text); border-color: var(--text); }
+  .gdp-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .gdp-btn.primary:hover { opacity: .85; }
+
+  .gdp-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 2px;
+    padding: 40px 20px;
+    text-align: center;
+  }
+  .gdp-empty-icon { font-size: 32px; opacity: .25; margin-bottom: 6px; }
+
+  @media (max-width: 900px) {
+    .globe-layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+    .globe-detail-panel { max-height: 380px; }
+  }
+
+  /* ── Lap Times Page ───────────────────────────────────── */
+  #ltPage { padding: 20px; box-sizing: border-box; }
+  .lt-page-inner { display: flex; flex-direction: column; gap: 10px; }
+
+  .lt-round-strip-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .lt-round-strip {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .lt-round-strip::-webkit-scrollbar { display: none; }
+  .lt-round-btn {
+    background: none;
+    border: none;
+    border-right: 1px solid var(--border);
+    color: var(--muted);
+    font-family: monospace;
+    font-size: 9px;
+    letter-spacing: 1.2px;
+    padding: 8px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .15s;
+    flex-shrink: 0;
+    text-align: center;
+    line-height: 1.5;
+  }
+  .lt-round-btn:hover { color: var(--text); background: rgba(255,255,255,.04); }
+  .lt-round-btn.active { color: var(--accent); background: rgba(225,6,0,.09); box-shadow: inset 0 -2px 0 var(--accent); }
+
+  .lt-view-tabs {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .lt-view-tab {
+    background: none;
+    border: none;
+    border-right: 1px solid var(--border);
+    color: var(--muted);
+    font-family: monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 9px 18px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .lt-view-tab:last-child { border-right: none; }
+  .lt-view-tab:hover { color: var(--text); }
+  .lt-view-tab.active { color: var(--accent); background: rgba(225,6,0,.08); }
+
+  .lt-race-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    font-family: monospace;
+    padding: 4px 2px;
+  }
+  .lt-race-title { font-size: 14px; letter-spacing: 2px; color: var(--text); font-weight: 700; }
+  .lt-race-meta  { font-size: 10px; letter-spacing: 1.5px; color: var(--muted); }
+
+  .lt-content {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    min-height: 280px;
+  }
+  .lt-table-wrap { overflow-x: auto; }
+  .lt-loading {
+    display: flex; align-items: center; justify-content: center;
+    padding: 60px 20px;
+    font-size: 10px; letter-spacing: 2px; color: var(--muted); font-family: monospace;
+  }
+  .lt-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 60px 20px; gap: 10px;
+    font-size: 10px; letter-spacing: 2px; color: var(--muted); font-family: monospace;
+    text-align: center;
+  }
+  .lt-empty-icon { font-size: 28px; opacity: .22; }
+
+  .lt-table { width: 100%; border-collapse: collapse; }
+  .lt-table th {
+    font-size: 8px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase;
+    padding: 9px 10px; text-align: left;
+    border-bottom: 1px solid var(--border); background: var(--surface);
+    font-weight: 400; white-space: nowrap;
+  }
+  .lt-table td {
+    padding: 8px 10px; font-size: 11px; font-family: monospace;
+    letter-spacing: 0.5px; border-bottom: 1px solid rgba(255,255,255,.035);
+    vertical-align: middle; white-space: nowrap;
+  }
+  .lt-table tr:last-child td { border-bottom: none; }
+  .lt-table tr:hover td { background: rgba(255,255,255,.022); }
+  .lt-pos { font-size: 10px; color: var(--muted); text-align: right; padding-right: 6px !important; width: 28px; }
+  .lt-team-bar { width: 3px; padding: 0 !important; }
+  .lt-driver-code { font-size: 12px; font-weight: 700; letter-spacing: 1.5px; color: var(--text); }
+  .lt-driver-name { font-size: 9px; color: var(--muted); letter-spacing: 0.5px; }
+  .lt-time     { font-size: 11px; letter-spacing: 1px; color: var(--text); }
+  .lt-time.dim { color: var(--muted); }
+  .lt-time.best{ color: var(--accent); font-weight: 700; }
+  .lt-delta    { font-size: 10px; color: var(--muted); min-width: 70px; }
+  .lt-delta.pole { color: var(--accent); font-weight: 700; font-size: 9px; letter-spacing: 1.5px; }
+  .lt-bar-cell { width: 130px; min-width: 80px; }
+  .lt-bar-track { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .lt-bar-fill  { height: 100%; border-radius: 2px; }
+  .lt-divider td {
+    font-size: 8px; letter-spacing: 2px; color: var(--muted); text-align: center;
+    padding: 5px 10px !important; background: rgba(255,255,255,.02);
+    border-bottom: 1px solid var(--border) !important;
+    border-top: 1px solid var(--border);
+  }
+  .lt-fl-badge {
+    display: inline-block; font-size: 8px; letter-spacing: 1.5px;
+    padding: 1px 5px; border-radius: 2px;
+    background: rgba(225,6,0,.18); color: var(--accent);
+    font-weight: 700; margin-left: 6px; vertical-align: middle;
+  }
+
+  /* Season poles grid */
+  .lt-poles-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+    gap: 1px;
+    background: var(--border);
+  }
+  .lt-pole-card {
+    background: var(--card); padding: 14px;
+    cursor: pointer; transition: background .15s;
+  }
+  .lt-pole-card:hover { background: rgba(255,255,255,.028); }
+  .lt-pole-round   { font-size: 8px; letter-spacing: 2px; color: var(--muted); margin-bottom: 4px; font-family: monospace; }
+  .lt-pole-circuit { font-size: 11px; letter-spacing: 1px; color: var(--text); font-weight: 700; margin-bottom: 2px; line-height: 1.3; }
+  .lt-pole-country { font-size: 9px; color: var(--muted); letter-spacing: 1px; margin-bottom: 8px; }
+  .lt-pole-driver  { font-size: 13px; letter-spacing: 1.5px; font-weight: 700; font-family: monospace; }
+  .lt-pole-team    { font-size: 9px; color: var(--muted); letter-spacing: 1px; margin-top: 1px; margin-bottom: 8px; }
+  .lt-pole-time    { font-size: 14px; letter-spacing: 1px; font-family: monospace; font-weight: 700; }
+  .lt-pole-bar-track { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 8px; }
+  .lt-pole-bar-fill  { height: 100%; border-radius: 2px; }
 
   .tracks-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
   .track-search {
     background:var(--card); border:1px solid var(--border); color:var(--text);
-    font-family:inherit; font-size:12px; padding:7px 12px; border-radius:3px; width:240px;
+    font-family:inherit; font-size:12px; padding:7px 12px; border-radius:3px;
+    flex:1; max-width:380px; min-width:160px;
   }
   .track-search:focus { outline:none; border-color:var(--accent); }
   .track-legend { display:flex; gap:14px; margin-left:auto; font-size:10px; color:var(--muted); }
@@ -899,7 +1281,7 @@
   .tleg-dot { width:9px; height:9px; border-radius:50%; }
 
   .tracks-grid {
-    display:grid; grid-template-columns:repeat(auto-fill, minmax(210px,1fr)); gap:12px;
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(195px,1fr)); gap:12px;
     margin-bottom:20px;
   }
   .track-card {
@@ -947,6 +1329,35 @@
   .tc-compound-M { background:#f5c518; color:#111; border-color:#d4aa00; }
   .tc-compound-S { background:#e10600; color:#fff; border-color:#c00000; }
 
+  /* Circuit SVG thumbnail inside card */
+  .track-card-circuit {
+    height:88px; background:var(--surface); position:relative;
+    display:flex; align-items:center; justify-content:center;
+    padding:10px 14px; border-bottom:1px solid var(--border); overflow:hidden;
+  }
+  .tc-circuit-svg { width:100%; height:100%; }
+  .tc-circuit-svg svg { display:block; }
+  .tc-status-pill {
+    position:absolute; top:7px; right:8px;
+    font-size:8px; font-weight:700; letter-spacing:1.2px; opacity:.9;
+    text-transform:uppercase; font-family:monospace;
+  }
+  .tc-round-pill {
+    position:absolute; top:7px; left:8px;
+    font-size:9px; font-weight:700; letter-spacing:1px;
+    color:var(--muted); font-family:monospace;
+  }
+
+  /* World map stats bar */
+  .world-map-stats {
+    background:var(--surface); border-top:1px solid var(--border);
+    padding:7px 18px; display:flex; align-items:center; gap:6px;
+    font-size:9px; letter-spacing:1.8px; color:var(--muted); font-family:monospace;
+    text-transform:uppercase;
+  }
+  .wms-sep { color:var(--border); margin:0 2px; }
+  .wms-num { font-weight:700; }
+
   /* Detail panel */
   #trackDetailPanel {
     display:none; background:var(--card); border:1px solid var(--accent);
@@ -965,8 +1376,25 @@
   }
   .tdp-close:hover { border-color:var(--accent); color:var(--accent); }
   .tdp-body { display:grid; grid-template-columns:1fr 1fr; gap:0; }
-  #trackMiniMap { height:340px; }
-  .tdp-stats { padding:20px; overflow-y:auto; max-height:340px; display:flex; flex-direction:column; gap:0; }
+  #trackMapContainer { display:flex; flex-direction:column; }
+  .tmap-view-tabs { display:flex; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+  .tmap-view-tab {
+    background:transparent; border:none; color:var(--muted); font-family:monospace;
+    font-size:9px; letter-spacing:2px; text-transform:uppercase; cursor:pointer;
+    padding:7px 14px; border-bottom:2px solid transparent; transition:all .2s;
+  }
+  .tmap-view-tab.active { color:var(--text); border-bottom-color:var(--accent); }
+  .tmap-view-tab:hover { color:var(--text); }
+  #trackMiniMap { height:308px; background:#0a0a0f; position:relative; }
+  #track3DCanvas { display:block; width:100%; height:308px; background:#0a0a0f; cursor:grab; }
+  #track3DCanvas:active { cursor:grabbing; }
+  .minimap-loader {
+    position:absolute; inset:0; background:#0a0a0f; z-index:500;
+    display:flex; align-items:center; justify-content:center;
+    font-size:10px; letter-spacing:2px; color:var(--muted); pointer-events:none;
+    transition:opacity .4s ease;
+  }
+  .tdp-stats { padding:20px; overflow-y:auto; height:340px; display:flex; flex-direction:column; gap:0; }
   .tdp-section { margin-bottom:16px; }
   .tdp-section-title { font-size:9px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px; }
   .tdp-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
@@ -980,7 +1408,8 @@
   .tdp-actions { display:flex; gap:8px; margin-top:auto; padding-top:12px; border-top:1px solid var(--border); }
   @media (max-width:800px) {
     .tdp-body { grid-template-columns:1fr; }
-    #trackMiniMap { height:220px; }
+    #trackMiniMap { height:188px; }
+    #track3DCanvas { height:188px; }
     .tracks-grid { grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); }
   }
 
@@ -1075,6 +1504,401 @@
   @media (max-width:460px) {
     .chance-podium { grid-template-columns: 1fr; }
   }
+
+  /* ── Drivers Page ──────────────────────────────────────── */
+  #driversPage { display:none; max-width:1200px; margin:0 auto; padding:24px; }
+  .drv-header {
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:20px; flex-wrap:wrap; gap:12px;
+  }
+  .drv-page-title {
+    font-size:10px; letter-spacing:3px; color:var(--muted); text-transform:uppercase;
+  }
+  .drv-search-wrap {
+    display:flex; align-items:center; gap:8px;
+  }
+  .drv-search {
+    background:var(--surface); border:1px solid var(--border); color:var(--text);
+    font-family:monospace; font-size:11px; padding:6px 12px; border-radius:3px;
+    outline:none; width:200px; transition:border-color .2s;
+  }
+  .drv-search:focus { border-color:var(--accent); }
+  .drv-season-stat-strip {
+    display:flex; gap:0; background:var(--surface); border:1px solid var(--border);
+    border-radius:4px; overflow:hidden; margin-bottom:20px;
+  }
+  .drv-ss-cell {
+    flex:1; padding:10px 14px; border-right:1px solid var(--border); min-width:0;
+  }
+  .drv-ss-cell:last-child { border-right:none; }
+  .drv-ss-label { font-size:9px; letter-spacing:1.5px; color:var(--muted); text-transform:uppercase; margin-bottom:3px; }
+  .drv-ss-val   { font-size:16px; font-weight:700; color:var(--text); }
+  .drv-ss-sub   { font-size:10px; color:var(--muted); margin-top:1px; }
+
+  /* Driver grid */
+  .drv-grid {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(340px,1fr)); gap:14px;
+  }
+  .drv-card {
+    background:var(--card); border:1px solid var(--border); border-radius:6px;
+    overflow:hidden; transition:border-color .2s, box-shadow .2s; cursor:pointer;
+  }
+  .drv-card:hover { border-color:var(--accent); box-shadow:0 0 16px rgba(225,6,0,.1); }
+  .drv-card.expanded { border-color:var(--accent); }
+  .drv-card-top {
+    display:flex; align-items:center; gap:0; padding:14px 16px; position:relative;
+    border-bottom:1px solid var(--border);
+  }
+  .drv-team-strip {
+    position:absolute; left:0; top:0; bottom:0; width:4px;
+  }
+  .drv-pos-badge {
+    font-size:22px; font-weight:800; color:var(--muted); min-width:36px;
+    text-align:center; margin-left:12px; flex-shrink:0;
+  }
+  .drv-pos-badge.p1 { color:var(--accent); }
+  .drv-pos-badge.p2 { color:#aaa; }
+  .drv-pos-badge.p3 { color:#cd7f32; }
+  .drv-name-block { flex:1; min-width:0; margin-left:10px; }
+  .drv-name  { font-size:13px; font-weight:700; letter-spacing:.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .drv-code  { font-size:10px; color:var(--muted); letter-spacing:2px; font-family:monospace; }
+  .drv-team-name { font-size:10px; letter-spacing:.5px; margin-top:1px; }
+  .drv-pts-block {
+    text-align:right; flex-shrink:0; margin-left:8px;
+  }
+  .drv-pts  { font-size:18px; font-weight:800; color:var(--text); }
+  .drv-pts-lbl { font-size:9px; color:var(--muted); letter-spacing:1px; text-transform:uppercase; }
+
+  /* stat pills */
+  .drv-stat-row {
+    display:flex; align-items:center; gap:6px; padding:8px 16px;
+    border-bottom:1px solid var(--border); flex-wrap:wrap;
+  }
+  .drv-pill {
+    display:flex; align-items:center; gap:4px; background:var(--surface);
+    border:1px solid var(--border); border-radius:3px; padding:3px 8px;
+    font-size:10px; font-family:monospace;
+  }
+  .drv-pill-lbl { color:var(--muted); letter-spacing:.5px; }
+  .drv-pill-val { font-weight:700; color:var(--text); }
+  .drv-pill.wins  .drv-pill-val { color:var(--accent); }
+  .drv-pill.pods  .drv-pill-val { color:#f5c518; }
+  .drv-pill.fl    .drv-pill-val { color:#9b59b6; }
+  .drv-pill.dnf   .drv-pill-val { color:#e10600; }
+  .drv-pill.quali .drv-pill-val { color:var(--blue); }
+
+  /* Recent form dots */
+  .drv-form-row {
+    display:flex; align-items:center; gap:6px; padding:8px 16px 10px;
+  }
+  .drv-form-lbl { font-size:9px; color:var(--muted); letter-spacing:1.5px; text-transform:uppercase; min-width:42px; }
+  .drv-form-dots { display:flex; gap:4px; align-items:center; }
+  .drv-dot {
+    width:22px; height:22px; border-radius:3px; display:flex; align-items:center;
+    justify-content:center; font-size:9px; font-weight:700; font-family:monospace;
+    flex-shrink:0;
+  }
+  .drv-dot.p1    { background:rgba(225,6,0,.25);  color:var(--accent);  border:1px solid rgba(225,6,0,.4); }
+  .drv-dot.pod   { background:rgba(0,200,117,.18); color:var(--green);   border:1px solid rgba(0,200,117,.3); }
+  .drv-dot.pts   { background:rgba(79,195,247,.15);color:#4fc3f7;        border:1px solid rgba(79,195,247,.3); }
+  .drv-dot.out   { background:rgba(255,255,255,.05); color:var(--muted); border:1px solid var(--border); }
+  .drv-dot.dnf   { background:rgba(225,6,0,.1);    color:var(--muted);   border:1px solid rgba(225,6,0,.2); text-decoration:line-through; }
+
+  /* Expanded detail */
+  .drv-detail {
+    display:none; border-top:1px solid var(--border); background:var(--surface);
+  }
+  .drv-card.expanded .drv-detail { display:block; }
+  .drv-detail-inner { padding:14px 16px; }
+  .drv-detail-title { font-size:9px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-bottom:10px; }
+  .drv-race-grid {
+    display:flex; flex-wrap:wrap; gap:4px; margin-bottom:14px;
+  }
+  .drv-race-cell {
+    width:28px; height:28px; border-radius:3px; display:flex; align-items:center;
+    justify-content:center; font-size:9px; font-weight:700; font-family:monospace;
+    position:relative; cursor:default; transition:transform .1s;
+  }
+  .drv-race-cell:hover { transform:scale(1.15); z-index:10; }
+  .drv-race-cell.rp1  { background:rgba(225,6,0,.3);   color:var(--accent); }
+  .drv-race-cell.rpod { background:rgba(245,197,24,.25); color:#f5c518; }
+  .drv-race-cell.rpts { background:rgba(0,200,117,.18);  color:var(--green); }
+  .drv-race-cell.rout { background:rgba(255,255,255,.06); color:var(--muted); }
+  .drv-race-cell.rdnf { background:rgba(225,6,0,.12);   color:rgba(225,6,0,.5); text-decoration:line-through; }
+
+  /* H2H bar */
+  .drv-h2h-wrap {
+    margin-top:2px; background:var(--card); border:1px solid var(--border);
+    border-radius:3px; padding:10px 12px;
+  }
+  .drv-h2h-title { font-size:9px; letter-spacing:1.5px; color:var(--muted); text-transform:uppercase; margin-bottom:8px; }
+  .drv-h2h-bar-row { display:flex; align-items:center; gap:6px; }
+  .drv-h2h-name { font-size:10px; color:var(--muted); min-width:60px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .drv-h2h-name.right { text-align:right; }
+  .drv-h2h-bar-track {
+    flex:1; height:10px; background:var(--surface); border-radius:5px; overflow:hidden;
+    display:flex;
+  }
+  .drv-h2h-fill-l { height:100%; border-radius:5px 0 0 5px; transition:width .6s; }
+  .drv-h2h-fill-r { height:100%; border-radius:0 5px 5px 0; transition:width .6s; }
+  .drv-h2h-score { font-size:10px; font-weight:700; font-family:monospace; flex-shrink:0; }
+
+  .drv-quali-avg {
+    margin-top:10px; font-size:11px;
+    display:flex; gap:6px; align-items:center;
+  }
+  .drv-quali-avg-lbl { font-size:9px; letter-spacing:1.5px; color:var(--muted); text-transform:uppercase; }
+  .drv-quali-avg-val { font-family:monospace; font-weight:700; color:#4fc3f7; }
+
+  @media (max-width:760px) {
+    .drv-grid { grid-template-columns:1fr; }
+    .drv-season-stat-strip { flex-wrap:wrap; }
+    .drv-ss-cell { min-width:50%; border-bottom:1px solid var(--border); }
+  }
+
+  /* ── Overview / Dashboard Page ────────────────────────── */
+  #overviewPage { display:none; max-width:1300px; margin:0 auto; padding:20px 24px 40px; }
+  .ov-grid {
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    grid-template-rows:auto auto auto;
+    gap:14px;
+  }
+  .ov-card {
+    background:var(--card); border:1px solid var(--border); border-radius:6px;
+    overflow:hidden; display:flex; flex-direction:column;
+  }
+  .ov-card-head {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 14px; border-bottom:1px solid var(--border);
+    background:var(--surface); flex-shrink:0;
+  }
+  .ov-card-title {
+    font-size:9px; letter-spacing:2.5px; color:var(--muted); text-transform:uppercase; font-weight:700;
+  }
+  .ov-card-badge {
+    font-size:9px; letter-spacing:1px; font-family:monospace; padding:2px 7px;
+    border-radius:2px; border:1px solid var(--border); color:var(--muted);
+  }
+  .ov-card-body { padding:14px; flex:1; overflow:hidden; }
+
+  /* ── Next Race card ── */
+  .ov-race-name { font-size:16px; font-weight:700; letter-spacing:.5px; margin-bottom:2px; }
+  .ov-race-meta { font-size:10px; color:var(--muted); letter-spacing:.5px; margin-bottom:12px; }
+  .ov-countdown-row { display:flex; gap:8px; margin-bottom:12px; }
+  .ov-cd-cell {
+    flex:1; background:var(--surface); border:1px solid var(--border);
+    border-radius:4px; padding:8px 4px; text-align:center;
+  }
+  .ov-cd-num { font-size:20px; font-weight:800; font-family:monospace; }
+  .ov-cd-lbl { font-size:8px; color:var(--muted); letter-spacing:1.5px; text-transform:uppercase; margin-top:1px; }
+  .ov-weather-strip {
+    display:flex; gap:6px; flex-wrap:wrap;
+  }
+  .ov-w-pill {
+    background:var(--surface); border:1px solid var(--border); border-radius:3px;
+    padding:3px 8px; font-size:10px; font-family:monospace;
+    display:flex; align-items:center; gap:4px;
+  }
+  .ov-w-label { color:var(--muted); font-size:9px; }
+
+  /* ── Championship standings ── */
+  .ov-champ-row {
+    display:grid; grid-template-columns:22px 1fr 50px 28px; align-items:center;
+    gap:6px; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.04);
+  }
+  .ov-champ-row:last-child { border-bottom:none; }
+  .ov-champ-pos { font-size:11px; color:var(--muted); font-weight:700; text-align:right; }
+  .ov-champ-driver { min-width:0; }
+  .ov-champ-name { font-size:11px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ov-champ-team { font-size:9px; color:var(--muted); }
+  .ov-champ-pts  { font-size:12px; font-weight:700; text-align:right; }
+  .ov-champ-strip { width:3px; height:28px; border-radius:2px; flex-shrink:0; }
+
+  /* ── Constructor standings ── */
+  .ov-con-row {
+    display:flex; align-items:center; gap:8px;
+    padding:5px 0; border-bottom:1px solid rgba(255,255,255,.04);
+  }
+  .ov-con-row:last-child { border-bottom:none; }
+  .ov-con-pos  { font-size:10px; color:var(--muted); font-weight:700; min-width:18px; text-align:right; }
+  .ov-con-bar-wrap { flex:1; height:6px; background:var(--surface); border-radius:3px; overflow:hidden; }
+  .ov-con-bar  { height:100%; border-radius:3px; transition:width .6s cubic-bezier(.4,0,.2,1); }
+  .ov-con-pts  { font-size:11px; font-weight:700; min-width:38px; text-align:right; }
+  .ov-con-name { font-size:10px; min-width:90px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* ── Season stats ── */
+  .ov-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .ov-stat-cell {
+    background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:10px 12px;
+  }
+  .ov-stat-lbl { font-size:8px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-bottom:4px; }
+  .ov-stat-val { font-size:16px; font-weight:800; }
+  .ov-stat-sub { font-size:9px; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* ── Last race ── */
+  .ov-last-race-header { font-size:10px; font-weight:700; color:var(--muted); margin-bottom:10px; letter-spacing:.5px; }
+  .ov-podium-row {
+    display:flex; align-items:center; gap:8px; padding:5px 0;
+    border-bottom:1px solid rgba(255,255,255,.04);
+  }
+  .ov-podium-row:last-child { border-bottom:none; }
+  .ov-pod-medal { font-size:14px; font-weight:800; min-width:24px; text-align:center; }
+  .ov-pod-name  { font-size:11px; font-weight:600; flex:1; }
+  .ov-pod-team  { font-size:9px; color:var(--muted); }
+  .ov-pod-strip { width:3px; height:24px; border-radius:2px; flex-shrink:0; }
+
+  /* ── Prediction card ── */
+  .ov-pred-empty { color:var(--muted); font-size:10px; letter-spacing:1px; padding:10px 0; }
+  .ov-pred-race  { font-size:12px; font-weight:700; margin-bottom:8px; }
+  .ov-pred-row {
+    display:flex; align-items:center; gap:8px; padding:5px 0;
+    border-bottom:1px solid rgba(255,255,255,.04);
+  }
+  .ov-pred-row:last-child { border-bottom:none; }
+  .ov-pred-pos  { font-size:10px; color:var(--muted); min-width:22px; font-weight:700; }
+  .ov-pred-name { font-size:11px; font-weight:600; flex:1; }
+  .ov-pred-bar-wrap { width:80px; height:6px; background:var(--surface); border-radius:3px; overflow:hidden; }
+  .ov-pred-bar  { height:100%; border-radius:3px; }
+  .ov-pred-pct  { font-size:10px; font-weight:700; min-width:36px; text-align:right; font-family:monospace; }
+  .ov-pred-ts   { font-size:9px; color:var(--muted); margin-top:6px; }
+
+  /* ── Mini season grid ── */
+  .ov-mini-grid { overflow-x:auto; }
+  .ov-mini-table { border-collapse:collapse; white-space:nowrap; font-size:9px; font-family:monospace; width:100%; }
+  .ov-mini-table th { padding:2px 3px; font-size:8px; color:var(--muted); letter-spacing:.5px; font-weight:400;
+    border-bottom:1px solid var(--border); text-align:center; }
+  .ov-mini-table td { padding:1px 2px; text-align:center; }
+  .ov-mini-driver { font-size:9px; font-weight:600; padding:2px 6px 2px 0 !important;
+    white-space:nowrap; text-align:left !important; border-right:1px solid var(--border); }
+  .ov-mini-cell { width:18px; height:18px; border-radius:2px; font-size:8px; font-weight:700; }
+  .omc-p1  { background:rgba(225,6,0,.28);   color:#ff6b6b; }
+  .omc-pod { background:rgba(245,197,24,.2);  color:#f5c518; }
+  .omc-pts { background:rgba(0,200,117,.15);  color:var(--green); }
+  .omc-out { background:rgba(255,255,255,.04);color:var(--muted); }
+  .omc-dnf { background:rgba(225,6,0,.09);    color:rgba(225,6,0,.45); }
+  .omc-fut { color:var(--border); }
+
+  /* span cols */
+  .ov-span-2 { grid-column:span 2; }
+  .ov-span-3 { grid-column:span 3; }
+
+  @media(max-width:1000px) {
+    .ov-grid { grid-template-columns:1fr 1fr; }
+    .ov-span-2 { grid-column:span 1; }
+    .ov-span-3 { grid-column:span 2; }
+  }
+  @media(max-width:650px) {
+    .ov-grid { grid-template-columns:1fr; }
+    .ov-span-2,.ov-span-3 { grid-column:span 1; }
+  }
+
+  /* ── Season Results Matrix ─────────────────────────────── */
+  #seasonPage { display:none; padding:24px 0 40px; }
+  .sr-page-header {
+    padding:0 24px 16px; display:flex; align-items:center;
+    justify-content:space-between; flex-wrap:wrap; gap:10px;
+  }
+  .sr-page-title { font-size:10px; letter-spacing:3px; color:var(--muted); text-transform:uppercase; }
+  .sr-legend {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  }
+  .sr-legend-item {
+    display:flex; align-items:center; gap:4px; font-size:9px; color:var(--muted); letter-spacing:.5px;
+  }
+  .sr-legend-dot {
+    width:14px; height:14px; border-radius:2px; flex-shrink:0;
+  }
+  .sr-scroll-hint {
+    font-size:9px; color:var(--muted); letter-spacing:1px;
+    padding:0 24px 8px; opacity:.6;
+  }
+  .sr-outer {
+    overflow-x:auto; padding:0 24px;
+  }
+  .sr-table {
+    border-collapse:collapse; white-space:nowrap; font-family:monospace;
+    font-size:11px;
+  }
+  /* Header row */
+  .sr-table thead tr th {
+    padding:0; background:var(--bg); position:sticky; top:0; z-index:20;
+  }
+  .sr-th-driver {
+    position:sticky; left:0; z-index:30; background:var(--bg);
+    min-width:170px; max-width:170px; padding:8px 10px 8px 0;
+    border-bottom:2px solid var(--border); text-align:left;
+    font-size:9px; letter-spacing:2px; color:var(--muted); text-transform:uppercase;
+  }
+  .sr-th-round {
+    min-width:34px; max-width:34px; padding:4px 2px;
+    border-bottom:2px solid var(--border); border-left:1px solid rgba(255,255,255,.04);
+    text-align:center; vertical-align:bottom;
+  }
+  .sr-th-round-inner {
+    writing-mode:vertical-rl; transform:rotate(180deg);
+    font-size:8px; color:var(--muted); letter-spacing:1px;
+    padding:4px 0; text-transform:uppercase;
+  }
+  .sr-th-pts {
+    position:sticky; right:0; z-index:30; background:var(--bg);
+    min-width:52px; padding:8px 10px;
+    border-bottom:2px solid var(--border); border-left:2px solid var(--border);
+    font-size:9px; letter-spacing:2px; color:var(--muted); text-align:center;
+  }
+  /* Body rows */
+  .sr-table tbody tr { border-bottom:1px solid rgba(255,255,255,.04); }
+  .sr-table tbody tr:hover .sr-cell,
+  .sr-table tbody tr:hover .sr-td-driver,
+  .sr-table tbody tr:hover .sr-td-pts { background:#1e1e2e !important; }
+  .sr-td-driver {
+    position:sticky; left:0; z-index:10; background:var(--bg);
+    min-width:170px; max-width:170px; padding:5px 10px 5px 0;
+    border-right:2px solid var(--border);
+  }
+  .sr-driver-inner {
+    display:flex; align-items:center; gap:8px;
+  }
+  .sr-driver-strip { width:3px; height:28px; border-radius:2px; flex-shrink:0; }
+  .sr-driver-pos { font-size:11px; color:var(--muted); min-width:22px; text-align:right; font-weight:600; }
+  .sr-driver-name { font-size:11px; font-weight:600; color:var(--text); }
+  .sr-driver-code { font-size:9px; color:var(--muted); letter-spacing:1.5px; }
+  .sr-cell {
+    min-width:34px; max-width:34px; height:30px; padding:0; text-align:center;
+    vertical-align:middle; border-left:1px solid rgba(255,255,255,.04);
+    font-size:10px; font-weight:700; cursor:default; transition:filter .1s;
+    background:var(--bg);
+  }
+  .sr-cell:hover { filter:brightness(1.4); }
+  .sr-td-pts {
+    position:sticky; right:0; z-index:10; background:var(--bg);
+    min-width:52px; padding:5px 10px; text-align:center;
+    border-left:2px solid var(--border);
+    font-size:12px; font-weight:700; color:var(--text);
+  }
+  /* Cell colour classes */
+  .src-p1   { background:rgba(225,6,0,.30)  !important; color:#ff6b6b; }
+  .src-p2   { background:rgba(180,180,180,.22) !important; color:#ccc; }
+  .src-p3   { background:rgba(180,120,50,.25) !important; color:#cd7f32; }
+  .src-pts  { background:rgba(0,200,117,.14) !important; color:#00c875; }
+  .src-out  { background:rgba(255,255,255,.04) !important; color:var(--muted); }
+  .src-dnf  { background:rgba(225,6,0,.10)  !important; color:rgba(225,6,0,.5); }
+  .src-fl   { outline:2px solid rgba(155,89,182,.7); outline-offset:-2px; }
+  .src-empty { color:var(--border); }
+  /* Fastest lap mark inside cell */
+  .sr-fl-dot {
+    display:inline-block; width:4px; height:4px; border-radius:50%;
+    background:#9b59b6; vertical-align:super; margin-left:1px;
+  }
+  /* Tooltip */
+  #srTooltip {
+    position:fixed; display:none; background:#1a1a2e; border:1px solid var(--accent);
+    border-radius:4px; padding:6px 10px; font-size:10px; font-family:monospace;
+    pointer-events:none; z-index:9999; max-width:200px;
+    box-shadow:0 4px 16px rgba(0,0,0,.5); line-height:1.6;
+  }
+  /* Column highlight on hover */
+  .sr-col-highlight { background:rgba(225,6,0,.05) !important; }
 </style>
 </head>
 <body>
@@ -1095,6 +1919,11 @@
     <button class="nav-tab"        id="tabDatabase"  onclick="switchTab('database')">&#9707; DATABASE</button>
     <button class="nav-tab"        id="tabTracks"    onclick="switchTab('tracks')">&#9678; TRACKS</button>
     <button class="nav-tab"        id="tabChance"    onclick="switchTab('chance')">&#9685; CHANCE</button>
+    <button class="nav-tab"        id="tabGlobe"     onclick="switchTab('globe')">&#9670; GLOBE</button>
+    <button class="nav-tab"        id="tabLt"        onclick="switchTab('lt')">&#9660; LAP TIMES</button>
+    <button class="nav-tab"        id="tabOverview"  onclick="switchTab('overview')">&#9670; OVERVIEW</button>
+    <button class="nav-tab"        id="tabDrivers"   onclick="switchTab('drivers')">&#9673; DRIVERS</button>
+    <button class="nav-tab"        id="tabSeason"    onclick="switchTab('season')">&#9632; SEASON</button>
   </nav>
   <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
     <div style="font-size:11px;color:var(--muted)" id="liveSessionName"></div>
@@ -1370,6 +2199,15 @@
   <div class="panel" style="overflow:hidden;margin-bottom:20px">
     <div class="panel-header"><div class="dot"></div>2026 F1 WORLD CIRCUIT MAP</div>
     <div id="worldMapContainer"></div>
+    <div class="world-map-stats" id="worldMapStats" style="display:none">
+      <span class="wms-num" id="wmsTotal">—</span> <span>circuits</span>
+      <span class="wms-sep">·</span>
+      <span class="wms-num" id="wmsUpcoming" style="color:var(--green)">—</span> <span style="color:var(--green)">upcoming</span>
+      <span class="wms-sep">·</span>
+      <span class="wms-num" id="wmsPast">—</span> <span>past</span>
+      <span class="wms-sep">·</span>
+      <span id="wmsHighSC" style="color:var(--accent)"></span>
+    </div>
   </div>
 
   <!-- Toolbar -->
@@ -1399,7 +2237,14 @@
       <button class="tdp-close" onclick="selectTrack(null)">&#10005; CLOSE</button>
     </div>
     <div class="tdp-body">
-      <div id="trackMiniMap"></div>
+      <div id="trackMapContainer">
+        <div class="tmap-view-tabs">
+          <button class="tmap-view-tab active" id="tmapTab3d"  onclick="_switchTrackView('3d')">&#9672; 3D CIRCUIT</button>
+          <button class="tmap-view-tab"        id="tmapTabSat" onclick="_switchTrackView('satellite')">&#9678; SATELLITE</button>
+        </div>
+        <div id="trackMiniMap" style="display:none"></div>
+        <canvas id="track3DCanvas"></canvas>
+      </div>
       <div class="tdp-stats" id="tdpStats"></div>
     </div>
   </div>
@@ -1450,6 +2295,141 @@
 
     </div>
   </div>
+</div>
+
+<!-- ── Globe Page ── -->
+<div id="globePage" style="display:none">
+  <div class="globe-layout">
+
+    <!-- Left: 3D Globe canvas -->
+    <div class="globe-canvas-wrap">
+      <div class="globe-canvas-header">
+        <span class="globe-canvas-title">&#9670; F1 2026 WORLD CIRCUIT MAP</span>
+        <div class="globe-legend">
+          <span><span class="globe-legend-dot" style="background:#e10600"></span>UPCOMING</span>
+          <span><span class="globe-legend-dot" style="background:#f5c518"></span>NEXT RACE</span>
+          <span><span class="globe-legend-dot" style="background:#444455"></span>COMPLETED</span>
+        </div>
+      </div>
+      <canvas id="globe3DCanvas"></canvas>
+      <div class="globe-stats-strip" id="globeStatsStrip">
+        <span class="gss-num" id="gssCircuits">25</span> <span>CIRCUITS</span>
+        <span class="gss-sep">·</span>
+        <span class="gss-num" id="gssCountries">—</span> <span>COUNTRIES</span>
+        <span class="gss-sep">·</span>
+        <span class="gss-num" id="gssContinents">5</span> <span>CONTINENTS</span>
+        <span class="gss-sep">·</span>
+        <span class="gss-num" id="gssKm">—</span> <span>TOTAL KM</span>
+      </div>
+    </div>
+
+    <!-- Right: Circuit detail -->
+    <div class="globe-detail-panel" id="globeDetailPanel">
+      <div class="gdp-empty">
+        <div class="gdp-empty-icon">&#9670;</div>
+        CLICK A CIRCUIT<br>
+        <span style="font-size:9px;font-weight:400;opacity:.5;letter-spacing:1px;text-transform:none">
+          Select any marker on the globe to view circuit data
+        </span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Lap Times Page ── -->
+<div id="ltPage" style="display:none">
+  <div class="lt-page-inner">
+
+    <!-- Round strip -->
+    <div class="lt-round-strip-wrap" id="ltRoundStripWrap">
+      <div class="lt-round-strip" id="ltRoundStrip">
+        <div class="lt-loading" style="padding:10px 16px">LOADING ROUNDS...</div>
+      </div>
+    </div>
+
+    <!-- Race header -->
+    <div class="lt-race-header" id="ltRaceHeader" style="display:none">
+      <span class="lt-race-title" id="ltRaceTitle"></span>
+      <span class="lt-race-meta"  id="ltRaceMeta"></span>
+    </div>
+
+    <!-- View tabs -->
+    <div class="lt-view-tabs">
+      <button class="lt-view-tab active" id="ltTabQual"    onclick="_ltSwitchView('qual')">&#9672; QUALIFYING</button>
+      <button class="lt-view-tab"        id="ltTabFastest" onclick="_ltSwitchView('fastest')">&#9660; FASTEST LAPS</button>
+      <button class="lt-view-tab"        id="ltTabPoles"   onclick="_ltSwitchView('poles')">&#9670; SEASON POLES</button>
+    </div>
+
+    <!-- Content -->
+    <div class="lt-content" id="ltContent">
+      <div class="lt-empty">
+        <div class="lt-empty-icon">&#9660;</div>
+        SELECT A ROUND ABOVE
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Drivers Page ── -->
+<div id="driversPage" style="display:none">
+  <div class="drv-header">
+    <div class="drv-page-title">&#9673; 2026 Driver Statistics</div>
+    <div class="drv-search-wrap">
+      <input class="drv-search" id="drvSearch" placeholder="Search driver or team..." oninput="_drvFilter()" />
+    </div>
+  </div>
+
+  <!-- Season-level strip -->
+  <div class="drv-season-stat-strip" id="drvStripWrap">
+    <div class="drv-ss-cell"><div class="drv-ss-label">Championship Leader</div><div class="drv-ss-val" id="drvStripLeader">—</div><div class="drv-ss-sub" id="drvStripLeaderPts"></div></div>
+    <div class="drv-ss-cell"><div class="drv-ss-label">Total Wins This Season</div><div class="drv-ss-val" id="drvStripWins">—</div><div class="drv-ss-sub">across all drivers</div></div>
+    <div class="drv-ss-cell"><div class="drv-ss-label">Races Completed</div><div class="drv-ss-val" id="drvStripRaces">—</div><div class="drv-ss-sub">of 24 scheduled</div></div>
+    <div class="drv-ss-cell"><div class="drv-ss-label">DNFs This Season</div><div class="drv-ss-val" id="drvStripDnfs">—</div><div class="drv-ss-sub">total retirements</div></div>
+  </div>
+
+  <!-- Driver grid -->
+  <div class="drv-grid" id="drvGrid">
+    <div style="color:var(--muted);font-size:11px;letter-spacing:2px;padding:40px;grid-column:1/-1;text-align:center">
+      LOADING DRIVER DATA...
+    </div>
+  </div>
+</div>
+
+<!-- ── Overview / Dashboard Page ── -->
+<div id="overviewPage" style="display:none">
+  <div class="ov-grid" id="ovGrid">
+    <!-- cards injected by JS -->
+    <div style="color:var(--muted);font-size:11px;letter-spacing:2px;padding:40px;grid-column:1/-1;text-align:center">LOADING OVERVIEW...</div>
+  </div>
+</div>
+
+<!-- ── Season Results Matrix Page ── -->
+<div id="seasonPage" style="display:none">
+  <div class="sr-page-header">
+    <div class="sr-page-title">&#9632; 2026 Season Results</div>
+    <div class="sr-legend">
+      <div class="sr-legend-item"><div class="sr-legend-dot src-p1"></div>WIN</div>
+      <div class="sr-legend-item"><div class="sr-legend-dot src-p2"></div>P2</div>
+      <div class="sr-legend-item"><div class="sr-legend-dot src-p3"></div>P3</div>
+      <div class="sr-legend-item"><div class="sr-legend-dot src-pts"></div>POINTS</div>
+      <div class="sr-legend-item"><div class="sr-legend-dot src-out"></div>OUT OF PTS</div>
+      <div class="sr-legend-item"><div class="sr-legend-dot src-dnf"></div>DNF</div>
+      <div class="sr-legend-item" style="gap:4px"><div class="sr-fl-dot" style="width:8px;height:8px;vertical-align:middle;display:inline-block"></div>FASTEST LAP</div>
+    </div>
+  </div>
+  <div class="sr-scroll-hint">&#8592; scroll horizontally for all rounds</div>
+  <div class="sr-outer" id="srOuter">
+    <div style="color:var(--muted);font-size:11px;letter-spacing:2px;padding:40px;text-align:center">LOADING...</div>
+  </div>
+</div>
+<div id="srTooltip"></div>
+
+<!-- floating tooltip for globe hover -->
+<div id="globeTooltip">
+  <div id="gtName"></div>
+  <div class="gt-country" id="gtCountry"></div>
 </div>
 
 <!-- ── Driver Detail Card ── -->
@@ -1550,11 +2530,13 @@ const TEAM_COLORS = {
   red_bull:'#3671c6', mercedes:'#27f4d2', ferrari:'#e8002d',
   mclaren:'#ff8000', aston_martin:'#229971', alpine:'#ff87bc',
   williams:'#64c4ff', rb:'#6692ff', sauber:'#52e252', haas:'#b6babd',
+  audi:'#c8c8c8', cadillac:'#1a5fb4',
 };
 const TEAM_NAMES = {
   red_bull:'Red Bull', mercedes:'Mercedes', ferrari:'Ferrari',
   mclaren:'McLaren', aston_martin:'Aston Martin', alpine:'Alpine',
   williams:'Williams', rb:'RB', sauber:'Sauber/Audi', haas:'Haas',
+  audi:'Audi', cadillac:'Cadillac',
 };
 const COMPOUND_LABELS = {C1:'Hard',C2:'Hard',C3:'Medium',C4:'Medium',C5:'Soft',C6:'Soft'};
 
@@ -1882,7 +2864,15 @@ function renderFactors(results) {
           <span class="team-strip" style="background:${color};height:20px"></span>
           <span style="font-weight:600">${r.name}</span>
         </td>
-        <td style="color:var(--muted);font-size:11px">${r.pace_source === 'qualifying' ? 'QUALI' : 'CHAMP'}</td>
+        <td style="font-size:10px;color:${
+          r.pace_source==='qualifying'?'var(--blue)':
+          r.pace_source==='quali_form'?'#f5c518':
+          r.pace_source==='live'?'var(--green)':
+          'var(--muted)'}">${
+          r.pace_source==='qualifying'?'QUALI':
+          r.pace_source==='quali_form'?'Q·FORM':
+          r.pace_source==='live'?'LIVE':
+          'CHAMP'}</td>
         <td>${mkBar(r.form,          'form')}</td>
         <td>${mkBar(r.reliability,   'rel')}</td>
         <td>${mkBar(r.tire_mgmt,     'tire')}</td>
@@ -3112,13 +4102,29 @@ function switchTab(tab) {
   document.getElementById('tabDatabase').classList.toggle('active',  tab === 'database');
   document.getElementById('tabTracks').classList.toggle('active',    tab === 'tracks');
   document.getElementById('tabChance').classList.toggle('active',    tab === 'chance');
-  document.querySelector('main').style.display         = tab === 'predictor' ? '' : 'none';
-  document.getElementById('dbPage').style.display      = tab === 'database'  ? 'block' : 'none';
-  document.getElementById('tracksPage').style.display  = tab === 'tracks'    ? 'block' : 'none';
-  document.getElementById('chancePage').style.display  = tab === 'chance'    ? 'block' : 'none';
+  document.getElementById('tabGlobe').classList.toggle('active',     tab === 'globe');
+  document.getElementById('tabLt').classList.toggle('active',         tab === 'lt');
+  document.getElementById('tabOverview').classList.toggle('active',   tab === 'overview');
+  document.getElementById('tabDrivers').classList.toggle('active',    tab === 'drivers');
+  document.getElementById('tabSeason').classList.toggle('active',     tab === 'season');
+  document.querySelector('main').style.display          = tab === 'predictor' ? '' : 'none';
+  document.getElementById('dbPage').style.display       = tab === 'database'  ? 'block' : 'none';
+  document.getElementById('tracksPage').style.display   = tab === 'tracks'    ? 'block' : 'none';
+  document.getElementById('chancePage').style.display   = tab === 'chance'    ? 'block' : 'none';
+  document.getElementById('globePage').style.display    = tab === 'globe'     ? 'block' : 'none';
+  document.getElementById('ltPage').style.display       = tab === 'lt'        ? 'block' : 'none';
+  document.getElementById('driversPage').style.display  = tab === 'drivers'   ? 'block' : 'none';
+  document.getElementById('seasonPage').style.display   = tab === 'season'    ? 'block' : 'none';
+  document.getElementById('overviewPage').style.display = tab === 'overview'  ? 'block' : 'none';
   if (tab === 'database') loadHistory();
   if (tab === 'tracks')   initTracksPage();
   if (tab === 'chance')   renderChancePage();
+  if (tab === 'globe')    initGlobePage();
+  if (tab === 'lt')       initLaptimesPage();
+  if (tab === 'drivers')  initDriversPage();
+  if (tab === 'season')   initSeasonMatrix();
+  if (tab === 'overview') initOverview();
+  if (tab !== 'globe')    _stopGlobeAnim();
 }
 
 // ── Chance Page ───────────────────────────────────────────────────────────────
@@ -3355,8 +4361,9 @@ function _dbRow({ race, rnd, runs, latest }) {
     : `<span style="color:var(--muted);font-size:11px;letter-spacing:1px">No prediction yet</span>`;
 
   const paceCls = !latest ? ''
-    : latest.pace_source === 'qualifying'   ? 'db-pace-qualifying'
-    : latest.pace_source === 'live'         ? 'db-pace-live'
+    : latest.pace_source === 'qualifying'  ? 'db-pace-qualifying'
+    : latest.pace_source === 'quali_form'  ? 'db-pace-quali_form'
+    : latest.pace_source === 'live'        ? 'db-pace-live'
     : 'db-pace-championship';
 
   const dataCell = latest
@@ -3479,7 +4486,11 @@ async function _loadDbRaceDetail(rowKey, rnd, latestId) {
           ${runs.map(r => `
             <div style="display:flex;align-items:center;gap:12px;padding:5px 0;border-bottom:1px solid rgba(37,37,53,.4);font-size:11px">
               <span style="color:var(--muted)">${r.created_at?.replace('T',' ')||'—'}</span>
-              <span class="db-pace-badge ${r.pace_source==='qualifying'?'db-pace-qualifying':r.pace_source==='live'?'db-pace-live':'db-pace-championship'}">${r.pace_source||'?'}</span>
+              <span class="db-pace-badge ${
+                r.pace_source==='qualifying' ? 'db-pace-qualifying' :
+                r.pace_source==='quali_form' ? 'db-pace-quali_form' :
+                r.pace_source==='live'       ? 'db-pace-live' :
+                'db-pace-championship'}">${r.pace_source||'?'}</span>
               <span style="color:var(--muted)">${(r.top5||[])[0]?.name?.split(' ').pop()||'—'} favoured</span>
               <button class="db-replay-btn" style="padding:3px 10px;font-size:9px;margin-left:auto" onclick="replayRun(${r.id},event)">LOAD</button>
               <button class="db-delete-btn" onclick="deleteRun(event,${r.id})">✕</button>
@@ -3595,14 +4606,31 @@ let _worldMarkers     = {};
 let _miniMap          = null;
 let _tracksInited     = false;
 let _selectedTrackKey = null;
+let _track3DRenderer  = null;
+let _track3DAnimId    = null;
+let _curTrackView     = '3d';
+
+// Globe page state
+let _globeInited    = false;
+let _globeRenderer  = null;
+let _globeAnimId    = null;
+let _globeScene     = null;
+let _globeCamera    = null;
+let _globeControls  = null;
+let _globeMarkerMeshes = [];
+let _globeHovered   = null;
 let _seasonTracks     = [];   // 22 entries: API race data enriched with TRACK_DB
 
 function _trackDbEntry(circuitId) {
   const cid = (circuitId || '').toLowerCase();
-  return TRACK_DB.find(t =>
-    cid === t.key ||
-    (cid === 'catalunya' && t.key === 'barcelona')
-  ) || null;
+  const ALIASES = {
+    'catalunya':    'barcelona',
+    'madrid':       'madring',
+    'circuit_de_madrid': 'madring',
+    'villeneuve_gp': 'villeneuve',
+  };
+  const resolved = ALIASES[cid] || cid;
+  return TRACK_DB.find(t => resolved === t.key) || null;
 }
 
 async function initTracksPage() {
@@ -3723,10 +4751,28 @@ function renderTrackCards(q) {
 
   const grid = document.getElementById('trackCardsGrid');
   if (!tracks.length) {
-    grid.innerHTML = `<div style="color:var(--muted);font-size:12px;letter-spacing:1px;padding:20px;grid-column:1/-1">No circuits match "${q}"</div>`;
+    grid.innerHTML = `<div style="color:var(--muted);font-size:12px;letter-spacing:1px;padding:20px;grid-column:1/-1">No circuits match "${_esc(q)}"</div>`;
     return;
   }
   grid.innerHTML = tracks.map(_trackCard).join('');
+
+  // Populate world map stats bar on first unfiltered render
+  if (!filter) {
+    const total    = _seasonTracks.length;
+    const upcoming = _seasonTracks.filter(t => { const s=_trackStatus(t); return s.order===0||s.order===1; }).length;
+    const past     = _seasonTracks.filter(t => _trackStatus(t).order === 3).length;
+    const highSC   = _seasonTracks.filter(t => t.sc_prob >= 0.6);
+    const statsEl  = document.getElementById('worldMapStats');
+    if (statsEl && !statsEl._populated) {
+      statsEl._populated = true;
+      document.getElementById('wmsTotal').textContent    = total;
+      document.getElementById('wmsUpcoming').textContent = upcoming;
+      document.getElementById('wmsPast').textContent     = past;
+      const scEl = document.getElementById('wmsHighSC');
+      if (scEl && highSC.length) scEl.textContent = highSC.length + ' HIGH SC RISK';
+      statsEl.style.display = '';
+    }
+  }
 }
 
 function _dots(val, max=5) {
@@ -3736,6 +4782,24 @@ function _dots(val, max=5) {
   return h;
 }
 
+function _circuitSvg(key, strokeColor) {
+  const raw = TRACK_3D_PATHS[key];
+  if (!raw) return '';
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const [x, z] of raw) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  const pad = 6, vw = (maxX - minX + pad * 2).toFixed(1), vh = (maxZ - minZ + pad * 2).toFixed(1);
+  const ox = minX - pad, oz = minZ - pad;
+  const pts = raw.map(([x, z]) => `${(x - ox).toFixed(1)},${(z - oz).toFixed(1)}`).join(' ');
+  const c = strokeColor || '#555568';
+  return `<svg viewBox="0 0 ${vw} ${vh}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
+    <polyline points="${pts}" fill="none" stroke="${c}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+    <circle cx="${(raw[0][0]-ox).toFixed(1)}" cy="${(raw[0][1]-oz).toFixed(1)}" r="2.5" fill="${c}" opacity="0.9"/>
+  </svg>`;
+}
+
 function _trackCard(t) {
   const st       = _trackStatus(t);
   const selected = t.key === _selectedTrackKey;
@@ -3743,21 +4807,25 @@ function _trackCard(t) {
   const sc_color = t.sc_prob >= 0.60 ? 'var(--accent)' : t.sc_prob >= 0.40 ? 'var(--yellow)' : 'var(--green)';
   const raceLen  = (t.laps * t.length_km).toFixed(0);
 
-  const badges = `
-    ${t.round ? `<span class="tc-round-badge">R${t.round}</span>` : ''}
-    ${t.raceDate ? `<span class="tc-date-badge">${t.raceDate}</span>` : ''}
-    ${st.label ? `<span class="tc-status-badge ${st.cls}">${st.label}</span>` : ''}`;
-
   const compounds = (t.compounds||[]).map(c => {
     const info = TC_COMP[c] || { label:c, cls:'', title:c };
     return `<span class="tc-compound ${info.cls}" title="${info.title}">${info.label}</span>`;
   }).join('');
 
+  const svgColor  = st.mapColor || '#555568';
+  const statusBg  = st.order === 0 ? 'rgba(225,6,0,.08)'   :
+                    st.order === 1 ? 'rgba(0,200,117,.06)'  :
+                    st.order === 2 ? 'rgba(245,197,24,.06)' : 'transparent';
+
   return `<div class="track-card${selected?' tc-selected':''}" id="tc-${t.key}" onclick="selectTrack('${t.key}')">
+    <div class="track-card-circuit" style="background:${statusBg}">
+      <div class="tc-circuit-svg">${_circuitSvg(t.key, svgColor)}</div>
+      ${t.round ? `<div class="tc-round-pill">R${t.round}</div>` : ''}
+      ${st.label ? `<div class="tc-status-pill" style="color:${svgColor}">${st.label}</div>` : ''}
+    </div>
     <div class="track-card-header">
       <div class="track-card-name">${t.name}</div>
-      <div class="track-card-country">${t.country}</div>
-      <div class="track-card-badges">${badges}</div>
+      <div class="track-card-country">${t.country}${t.raceDate ? `<span style="color:var(--border);margin:0 4px">·</span>${t.raceDate}` : ''}</div>
     </div>
     <div class="track-card-stats">
       <div class="tc-row"><span class="tc-lbl">Laps</span><span class="tc-val">${t.laps}</span></div>
@@ -3803,6 +4871,11 @@ function selectTrack(key) {
   } else {
     panel.style.display = 'none';
     if (_miniMap) { _miniMap.remove(); _miniMap = null; }
+    if (_track3DRenderer) {
+      cancelAnimationFrame(_track3DAnimId);
+      _track3DRenderer.dispose();
+      _track3DRenderer = null;
+    }
   }
 }
 
@@ -3860,27 +4933,16 @@ function _renderTrackDetail(key) {
     <div class="tdp-actions">${runBtn}</div>
   `;
 
-  // Destroy old mini-map
+  // Destroy old views
   if (_miniMap) { _miniMap.remove(); _miniMap = null; }
+  if (_track3DRenderer) {
+    cancelAnimationFrame(_track3DAnimId);
+    _track3DRenderer.dispose();
+    _track3DRenderer = null;
+  }
 
-  // Build satellite mini-map
-  setTimeout(() => {
-    const el = document.getElementById('trackMiniMap');
-    if (!el) return;
-    _miniMap = L.map(el, {
-      center: [t.lat, t.lon], zoom: 14,
-      zoomControl: true, attributionControl: false,
-      scrollWheelZoom: true,
-    });
-    // Satellite layer shows actual circuit outline from above
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles &copy; Esri', maxZoom: 19,
-    }).addTo(_miniMap);
-    // Pin marker
-    L.circleMarker([t.lat, t.lon], {
-      radius: 8, fillColor: '#e10600', color: '#fff', weight: 2.5, fillOpacity: 1
-    }).bindPopup(t.name).addTo(_miniMap);
-  }, 80);
+  // Mount the active view — go through _switchTrackView so display state is always correct
+  _switchTrackView(_curTrackView);
 }
 
 // ── Screenshot / Export ──────────────────────────────────────────────────────
@@ -3949,6 +5011,1527 @@ async function exportPrediction() {
     setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000);
   }
 }
+
+// ── 3D Track Viewer ────────────────────────────────────────────────────────
+
+const TRACK_3D_PATHS = {
+  albert_park:   [[0,38],[20,32],[35,18],[38,2],[32,-14],[20,-26],[5,-32],[-10,-28],[-22,-18],[-28,-4],[-24,12],[-14,28],[0,38]],
+  bahrain:       [[0,36],[18,30],[30,16],[34,0],[28,-14],[18,-22],[8,-26],[0,-28],[-8,-22],[-16,-12],[-18,0],[-14,12],[-8,24],[0,36]],
+  jeddah:        [[0,42],[14,40],[28,34],[40,22],[46,6],[44,-10],[36,-24],[22,-36],[6,-42],[-10,-42],[-26,-36],[-38,-22],[-44,-8],[-44,8],[-38,22],[-24,34],[-10,40],[0,42]],
+  suzuka:        [[0,38],[15,32],[26,18],[28,2],[22,-10],[12,-18],[4,-10],[0,0],[-4,-10],[-12,-18],[-22,-26],[-28,-14],[-24,2],[-14,18],[-4,30],[0,38]],
+  shanghai:      [[0,36],[18,30],[30,14],[34,-2],[28,-16],[15,-26],[4,-30],[-6,-24],[-10,-12],[-10,0],[-14,12],[-20,24],[-14,34],[0,36]],
+  miami:         [[0,38],[16,34],[30,22],[40,6],[38,-12],[26,-26],[10,-34],[-8,-36],[-24,-30],[-36,-16],[-40,0],[-36,16],[-24,28],[-8,36],[0,38]],
+  imola:         [[0,32],[14,26],[22,12],[20,-4],[12,-16],[2,-22],[-8,-18],[-14,-6],[-12,8],[-6,20],[0,32]],
+  monaco:        [[0,32],[10,26],[18,14],[20,2],[15,-8],[8,-14],[2,-18],[-4,-14],[-8,-4],[-10,8],[-12,20],[-8,30],[0,32]],
+  barcelona:     [[-38,36],[38,36],[44,24],[40,8],[28,-4],[16,-14],[8,-22],[14,-30],[6,-36],[-8,-36],[-20,-28],[-28,-16],[-34,-4],[-40,8],[-42,22],[-38,36]],
+  villeneuve:    [[-40,20],[-40,34],[40,34],[44,22],[40,6],[32,-8],[20,-22],[6,-28],[-8,-28],[-22,-22],[-34,-8],[-40,6],[-40,20]],
+  red_bull_ring: [[-18,30],[18,30],[32,18],[36,2],[28,-14],[14,-24],[2,-28],[-10,-22],[-18,-10],[-20,8],[-18,30]],
+  silverstone:   [[-40,8],[-32,28],[-12,38],[10,40],[32,32],[44,14],[42,-6],[32,-22],[14,-30],[-8,-32],[-28,-24],[-40,-8],[-40,8]],
+  hungaroring:   [[-4,28],[8,22],[14,10],[12,-2],[6,-12],[-2,-18],[-8,-12],[-14,-2],[-14,10],[-10,20],[-4,28]],
+  spa:           [[-45,5],[-42,22],[-32,34],[-12,40],[10,36],[26,22],[38,6],[44,-10],[38,-24],[22,-34],[4,-38],[-14,-34],[-28,-22],[-38,-8],[-45,5]],
+  zandvoort:     [[-6,32],[10,28],[24,18],[30,4],[28,-12],[18,-24],[4,-30],[-10,-28],[-22,-18],[-28,-4],[-26,14],[-16,28],[-6,32]],
+  monza:         [[-36,18],[0,34],[36,18],[44,2],[40,-14],[26,-26],[10,-32],[-6,-32],[-20,-26],[-30,-14],[-36,2],[-36,18]],
+  baku:          [[-46,0],[-44,22],[-32,36],[-10,42],[12,42],[30,36],[44,22],[46,2],[42,-14],[30,-26],[16,-32],[6,-28],[2,-18],[6,-8],[2,0],[-46,0]],
+  marina_bay:    [[0,36],[16,30],[28,16],[34,0],[30,-14],[18,-26],[6,-32],[-8,-30],[-18,-20],[-22,-6],[-20,10],[-12,24],[-2,34],[0,36]],
+  americas:      [[-36,10],[-32,28],[-16,38],[4,40],[24,34],[38,18],[42,0],[36,-16],[22,-28],[6,-34],[-10,-36],[-24,-28],[-34,-16],[-38,-2],[-36,10]],
+  rodriguez:     [[-38,8],[-34,26],[-18,38],[4,40],[24,34],[38,18],[42,0],[36,-16],[22,-28],[6,-34],[-10,-36],[-24,-28],[-36,-16],[-38,-2],[-38,8]],
+  interlagos:    [[0,28],[12,22],[20,8],[18,-8],[10,-20],[0,-26],[-10,-20],[-16,-8],[-14,8],[-6,22],[0,28]],
+  vegas:         [[-45,-4],[-44,18],[-36,32],[-16,40],[6,40],[28,34],[44,18],[46,-4],[40,-20],[24,-32],[6,-38],[-14,-38],[-30,-30],[-40,-16],[-45,-4]],
+  losail:        [[0,38],[16,34],[30,22],[40,6],[38,-12],[26,-26],[8,-34],[-8,-36],[-24,-28],[-36,-14],[-40,2],[-36,18],[-24,30],[-8,38],[0,38]],
+  yas_marina:    [[0,36],[15,32],[27,20],[33,4],[30,-12],[18,-24],[6,-30],[-6,-26],[-12,-12],[-10,4],[-14,18],[-10,30],[0,36]],
+  madring:       [[-10,38],[8,36],[24,28],[34,12],[36,-6],[28,-22],[14,-32],[0,-36],[-14,-30],[-24,-18],[-28,-4],[-24,12],[-16,26],[-10,38]],
+};
+
+function _switchTrackView(mode) {
+  _curTrackView = mode;
+  const tab3d  = document.getElementById('tmapTab3d');
+  const tabSat = document.getElementById('tmapTabSat');
+  const mapEl  = document.getElementById('trackMiniMap');
+  const canvas = document.getElementById('track3DCanvas');
+  if (!tab3d || !tabSat || !mapEl || !canvas) return;
+
+  if (mode === '3d') {
+    tab3d.classList.add('active'); tabSat.classList.remove('active');
+    mapEl.style.display  = 'none';
+    canvas.style.display = 'block';
+    // Always tear down satellite map when leaving — avoids stale _miniMap reference
+    if (_miniMap) { _miniMap.remove(); _miniMap = null; }
+    if (_selectedTrackKey) {
+      const t = _seasonTracks.find(x => x.key === _selectedTrackKey);
+      if (t) _render3DTrack(t);
+    }
+  } else {
+    tabSat.classList.add('active'); tab3d.classList.remove('active');
+    canvas.style.display = 'none';
+    mapEl.style.display  = 'block';
+    if (_selectedTrackKey) {
+      const t = _seasonTracks.find(x => x.key === _selectedTrackKey);
+      if (t) setTimeout(() => _initMiniMap(t), 80);
+    }
+  }
+}
+
+function _initMiniMap(t) {
+  if (_miniMap) { _miniMap.remove(); _miniMap = null; }
+  const el = document.getElementById('trackMiniMap');
+  if (!el) return;
+  // Clear Leaflet's container stamp — required for re-mount on same element
+  delete el._leaflet_id;
+
+  // Dark overlay hides tile-load chunks; fades out once first tiles arrive
+  const loader = document.createElement('div');
+  loader.className = 'minimap-loader';
+  loader.textContent = 'LOADING SATELLITE';
+  el.appendChild(loader);
+
+  _miniMap = L.map(el, {
+    center: [t.lat, t.lon], zoom: 14,
+    zoomControl: true, attributionControl: false, scrollWheelZoom: true,
+  });
+
+  const tileLayer = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri', maxZoom: 19 }
+  ).addTo(_miniMap);
+
+  // Fade loader out when enough tiles have loaded
+  tileLayer.once('load', () => {
+    loader.style.opacity = '0';
+    setTimeout(() => loader.remove(), 420);
+  });
+
+  L.circleMarker([t.lat, t.lon], {
+    radius: 8, fillColor: '#e10600', color: '#fff', weight: 2.5, fillOpacity: 1,
+  }).bindPopup(t.name).addTo(_miniMap);
+
+  setTimeout(() => _miniMap && _miniMap.invalidateSize(), 150);
+}
+
+function _render3DTrack(t) {
+  if (typeof THREE === 'undefined') return;
+
+  if (_track3DRenderer) {
+    cancelAnimationFrame(_track3DAnimId);
+    _track3DRenderer.dispose();
+    _track3DRenderer = null;
+  }
+
+  const canvas = document.getElementById('track3DCanvas');
+  if (!canvas) return;
+
+  requestAnimationFrame(() => {
+    const W = canvas.clientWidth  || 440;
+    const H = canvas.clientHeight || 308;
+    if (W < 10 || H < 10) return;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a0f);
+    scene.fog        = new THREE.FogExp2(0x0a0a0f, 0.006);
+
+    const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 500);
+    camera.position.set(0, 72, 96);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(W, H, false);
+    _track3DRenderer = renderer;
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping   = true;
+    controls.dampingFactor   = 0.06;
+    controls.maxPolarAngle   = Math.PI / 2.1;
+    controls.minDistance     = 40;
+    controls.maxDistance     = 220;
+    controls.autoRotate      = true;
+    controls.autoRotateSpeed = 0.5;
+
+    // Subtle grid floor
+    const grid = new THREE.GridHelper(300, 60, 0x161624, 0x161624);
+    scene.add(grid);
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0x334466, 1.3));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.5);
+    dir.position.set(40, 80, 30);
+    scene.add(dir);
+    const pt = new THREE.PointLight(0xe10600, 2.0, 90);
+    pt.position.set(0, 14, 0);
+    scene.add(pt);
+
+    // Circuit spline
+    const raw   = TRACK_3D_PATHS[t.key] || TRACK_3D_PATHS['losail'];
+    const pts   = raw.map(([x, z]) => new THREE.Vector3(x, 0, z));
+    const curve = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.4);
+
+    // Track surface — dark asphalt slab
+    const trackMat = new THREE.MeshPhongMaterial({
+      color: 0x1c1c2c, emissive: 0x0a0a18, shininess: 50,
+    });
+    scene.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 300, 3.2, 8, true), trackMat));
+
+    // White kerb strip underneath (slightly wider, provides edge outline)
+    const kerbMat = new THREE.MeshPhongMaterial({
+      color: 0x282838, emissive: 0x0d0d1e, shininess: 20,
+    });
+    const kerbMesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 300, 3.6, 8, true), kerbMat);
+    kerbMesh.position.y = -0.3;
+    scene.add(kerbMesh);
+
+    // Red racing line on top
+    const lineMat = new THREE.MeshPhongMaterial({
+      color: 0xe10600, emissive: 0x770000, shininess: 120,
+    });
+    const lineMesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 300, 0.45, 6, true), lineMat);
+    lineMesh.position.y = 3.3;
+    scene.add(lineMesh);
+
+    // Start/finish marker (bright sphere at P=0 on the curve)
+    const sfPos  = curve.getPoint(0);
+    const sfGeo  = new THREE.SphereGeometry(1.4, 10, 10);
+    const sfMat  = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0xaaaaaa });
+    const sfMesh = new THREE.Mesh(sfGeo, sfMat);
+    sfMesh.position.set(sfPos.x, 4.2, sfPos.z);
+    scene.add(sfMesh);
+
+    // Warm point light at start/finish
+    const sfLight = new THREE.PointLight(0xffffff, 1.5, 40);
+    sfLight.position.set(sfPos.x, 10, sfPos.z);
+    scene.add(sfLight);
+
+    function animate() {
+      _track3DAnimId = requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  });
+}
+
+// ── End 3D Track Viewer ────────────────────────────────────────────────────
+
+// ── Globe Page ─────────────────────────────────────────────────────────────
+
+function _latLonToVec3(lat, lon, r) {
+  const phi   = (90 - lat) * Math.PI / 180;
+  const theta = (lon + 180) * Math.PI / 180;
+  return new THREE.Vector3(
+    -r * Math.sin(phi) * Math.cos(theta),
+     r * Math.cos(phi),
+     r * Math.sin(phi) * Math.sin(theta)
+  );
+}
+
+function _stopGlobeAnim() {
+  if (_globeAnimId) { cancelAnimationFrame(_globeAnimId); _globeAnimId = null; }
+}
+
+function _startGlobeAnim() {
+  _stopGlobeAnim();
+  function loop() {
+    _globeAnimId = requestAnimationFrame(loop);
+    if (_globeControls) _globeControls.update();
+    if (_globeRenderer && _globeScene && _globeCamera)
+      _globeRenderer.render(_globeScene, _globeCamera);
+  }
+  loop();
+}
+
+function _showGlobeTooltip(e, track) {
+  const tt = document.getElementById('globeTooltip');
+  if (!tt) return;
+  document.getElementById('gtName').textContent    = track.name || track.key;
+  document.getElementById('gtCountry').textContent = track.country || '';
+  tt.style.display = 'block';
+  tt.style.left    = (e.clientX + 14) + 'px';
+  tt.style.top     = (e.clientY - 10) + 'px';
+}
+function _hideGlobeTooltip() {
+  const tt = document.getElementById('globeTooltip');
+  if (tt) tt.style.display = 'none';
+}
+
+function initGlobePage() {
+  _updateGlobeStatsStrip();
+  if (_globeInited) { _startGlobeAnim(); return; }
+  _globeInited = true;
+
+  const canvas = document.getElementById('globe3DCanvas');
+  if (!canvas || !window.THREE) return;
+
+  // Size canvas to parent
+  function _sizeCanvas() {
+    const w = canvas.parentElement.clientWidth;
+    const h = canvas.parentElement.clientHeight - canvas.parentElement.querySelector('.globe-canvas-header').offsetHeight;
+    if (_globeCamera) {
+      _globeCamera.aspect = w / Math.max(h, 1);
+      _globeCamera.updateProjectionMatrix();
+    }
+    if (_globeRenderer) _globeRenderer.setSize(w, h, false);
+  }
+
+  // Renderer
+  _globeRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  _globeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  _globeRenderer.setClearColor(0x060b12, 1);
+
+  // Scene + camera
+  _globeScene  = new THREE.Scene();
+  _globeCamera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+  _globeCamera.position.set(0, 0, 3.0);
+
+  // Lights
+  _globeScene.add(new THREE.AmbientLight(0x223355, 1.2));
+  const sun = new THREE.DirectionalLight(0x88aaff, 0.9);
+  sun.position.set(4, 3, 4);
+  _globeScene.add(sun);
+  const fill = new THREE.DirectionalLight(0x112244, 0.4);
+  fill.position.set(-3, -2, -3);
+  _globeScene.add(fill);
+
+  // Globe sphere — dark ocean base
+  const earthMat = new THREE.MeshPhongMaterial({
+    color:      0x0c1828,
+    emissive:   0x060e18,
+    specular:   0x1a3a6c,
+    shininess:  22,
+  });
+  _globeScene.add(new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), earthMat));
+
+  // Atmosphere glow (slightly larger transparent sphere)
+  const atmosMat = new THREE.MeshPhongMaterial({
+    color:       0x1a4080,
+    transparent: true,
+    opacity:     0.10,
+    side:        THREE.BackSide,
+  });
+  _globeScene.add(new THREE.Mesh(new THREE.SphereGeometry(1.06, 32, 32), atmosMat));
+
+  // Grid lines (lat/lon every 30°)
+  const gridMat = new THREE.LineBasicMaterial({ color: 0x1a3a5c, transparent: true, opacity: 0.30 });
+  const R = 1.003;
+  for (let lat = -60; lat <= 60; lat += 30) {
+    const pts = [];
+    for (let lon = 0; lon <= 361; lon += 3) pts.push(_latLonToVec3(lat, lon, R));
+    _globeScene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+  }
+  for (let lon = 0; lon < 360; lon += 30) {
+    const pts = [];
+    for (let lat = -90; lat <= 90; lat += 3) pts.push(_latLonToVec3(lat, lon, R));
+    _globeScene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+  }
+
+  // Circuit markers
+  _globeMarkerMeshes = [];
+  const tracks = _seasonTracks.length ? _seasonTracks : TRACK_DB;
+  let nextRoundIdx = -1;
+  if (_seasonTracks.length) {
+    for (let i = 0; i < _seasonTracks.length; i++) {
+      const s = _trackStatus(_seasonTracks[i]);
+      if (s.order === 1) { nextRoundIdx = i; break; }
+    }
+  }
+
+  tracks.forEach((t, idx) => {
+    let color = 0xe10600;
+    if (_seasonTracks.length) {
+      const s = _trackStatus(t);
+      if (s.order === 3) color = 0x383848;
+      else if (idx === nextRoundIdx) color = 0xf5c518;
+    }
+
+    const pos = _latLonToVec3(t.lat, t.lon, 1.0);
+
+    // Dot sphere
+    const dotMat = new THREE.MeshBasicMaterial({ color });
+    const dot    = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 10), dotMat);
+    dot.position.copy(pos.clone().multiplyScalar(1.007));
+    dot.userData = { track: t, baseColor: color };
+    _globeScene.add(dot);
+    _globeMarkerMeshes.push(dot);
+
+    // Ring halo around each marker
+    const ringMat  = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.40 });
+    const ring     = new THREE.Mesh(new THREE.RingGeometry(0.031, 0.040, 20), ringMat);
+    const ringPos  = pos.clone().multiplyScalar(1.008);
+    ring.position.copy(ringPos);
+    ring.lookAt(ringPos.clone().multiplyScalar(2));
+    _globeScene.add(ring);
+  });
+
+  // OrbitControls
+  _globeControls = new THREE.OrbitControls(_globeCamera, canvas);
+  _globeControls.enableDamping   = true;
+  _globeControls.dampingFactor   = 0.055;
+  _globeControls.autoRotate      = true;
+  _globeControls.autoRotateSpeed = 0.35;
+  _globeControls.enablePan       = false;
+  _globeControls.minDistance     = 1.6;
+  _globeControls.maxDistance     = 6.0;
+
+  // Raycaster for hover/click
+  const raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.05;
+  const mouse = new THREE.Vector2();
+
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x =  ((e.clientX - rect.left)  / rect.width)  * 2 - 1;
+    mouse.y = -((e.clientY - rect.top)   / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, _globeCamera);
+    const hits = raycaster.intersectObjects(_globeMarkerMeshes);
+    if (hits.length) {
+      const h = hits[0].object;
+      if (_globeHovered !== h) {
+        if (_globeHovered) _globeHovered.scale.setScalar(1);
+        _globeHovered = h;
+        h.scale.setScalar(1.9);
+        canvas.style.cursor = 'pointer';
+        _showGlobeTooltip(e, h.userData.track);
+      } else {
+        const tt = document.getElementById('globeTooltip');
+        if (tt) { tt.style.left = (e.clientX + 14) + 'px'; tt.style.top = (e.clientY - 10) + 'px'; }
+      }
+    } else {
+      if (_globeHovered) { _globeHovered.scale.setScalar(1); _globeHovered = null; }
+      canvas.style.cursor = 'grab';
+      _hideGlobeTooltip();
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    if (_globeHovered) { _globeHovered.scale.setScalar(1); _globeHovered = null; }
+    _hideGlobeTooltip();
+  });
+
+  canvas.addEventListener('click', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x =  ((e.clientX - rect.left)  / rect.width)  * 2 - 1;
+    mouse.y = -((e.clientY - rect.top)   / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, _globeCamera);
+    const hits = raycaster.intersectObjects(_globeMarkerMeshes);
+    if (hits.length) {
+      _globeControls.autoRotate = false;
+      _renderGlobeDetail(hits[0].object.userData.track);
+    }
+  });
+
+  window.addEventListener('resize', _sizeCanvas);
+  requestAnimationFrame(_sizeCanvas);
+
+  _startGlobeAnim();
+
+  // Auto-select next upcoming race
+  if (_seasonTracks.length && nextRoundIdx >= 0) {
+    _renderGlobeDetail(_seasonTracks[nextRoundIdx]);
+  } else if (TRACK_DB.length) {
+    _renderGlobeDetail(TRACK_DB[0]);
+  }
+}
+
+function _updateGlobeStatsStrip() {
+  const tracks = _seasonTracks.length ? _seasonTracks : TRACK_DB;
+  document.getElementById('gssCircuits').textContent = tracks.length;
+
+  const countries = new Set(tracks.map(t => t.country));
+  document.getElementById('gssCountries').textContent = countries.size;
+
+  const CONT_MAP = {
+    'Australia':'Oceania',
+    'Bahrain':'Asia','Saudi Arabia':'Asia','Japan':'Asia','China':'Asia',
+    'Azerbaijan':'Asia','Singapore':'Asia','UAE':'Asia','Qatar':'Asia',
+    'USA':'Americas','Canada':'Americas','Mexico':'Americas','Brazil':'Americas',
+    'Monaco':'Europe','Spain':'Europe','Italy':'Europe','Great Britain':'Europe',
+    'Hungary':'Europe','Belgium':'Europe','Netherlands':'Europe','Austria':'Europe',
+  };
+  const conts = new Set(tracks.map(t => CONT_MAP[t.country] || 'Other'));
+  document.getElementById('gssContinents').textContent = conts.size;
+
+  const totalKm = tracks.reduce((s, t) => s + (t.laps * t.length_km || 0), 0);
+  document.getElementById('gssKm').textContent = Math.round(totalKm).toLocaleString();
+}
+
+function _renderGlobeDetail(t) {
+  const panel = document.getElementById('globeDetailPanel');
+  if (!panel) return;
+
+  const st = _seasonTracks.length ? _trackStatus(t) : null;
+  const roundLabel = (t.round ? 'ROUND ' + t.round : (st ? 'ROUND ' + (t.round || '—') : '—'));
+  const statusBadge = st ? `<span style="font-size:8px;letter-spacing:1.5px;padding:2px 7px;border-radius:2px;background:${
+    st.order===3?'rgba(100,100,120,.3)':st.order===1?'rgba(225,6,0,.18)':'rgba(255,165,0,.15)'
+  };color:${
+    st.order===3?'var(--muted)':st.order===1?'var(--accent)':'#ffa500'
+  }">${st.label}</span>` : '';
+
+  const compHtml = (t.compounds || []).map(c => {
+    const info = TC_COMP[c] || {};
+    return `<span class="${info.cls||''}" title="${info.title||c}" style="font-size:10px;padding:3px 8px">${info.label||c}</span>`;
+  }).join('');
+
+  const barHtml = (val, max, cls) =>
+    Array.from({length:max}, (_, i) =>
+      `<div class="gdp-bar-pip ${i < val ? cls : ''}"></div>`
+    ).join('');
+
+  const svg = _circuitSvg(t.key, '#e10600');
+
+  panel.innerHTML = `
+    <div class="gdp-header">
+      <div class="gdp-round">${roundLabel} ${statusBadge}</div>
+      <div class="gdp-name">${t.name}</div>
+      <div class="gdp-country">&#9670; ${t.country}</div>
+    </div>
+
+    <div class="gdp-svg-wrap">
+      ${svg || '<span style="font-size:9px;color:var(--muted);letter-spacing:1px">NO CIRCUIT DATA</span>'}
+    </div>
+
+    <div class="gdp-stats-grid">
+      <div class="gdp-stat-cell">
+        <div class="gdp-stat-label">LAPS</div>
+        <div class="gdp-stat-val">${t.laps}<span class="gdp-stat-unit">laps</span></div>
+      </div>
+      <div class="gdp-stat-cell">
+        <div class="gdp-stat-label">CIRCUIT LENGTH</div>
+        <div class="gdp-stat-val">${(t.length_km||0).toFixed(3)}<span class="gdp-stat-unit">km</span></div>
+      </div>
+      <div class="gdp-stat-cell">
+        <div class="gdp-stat-label">TIRE WEAR</div>
+        <div class="gdp-stat-val">${t.tire_wear}<span class="gdp-stat-unit">/5</span></div>
+        <div class="gdp-bar-wrap">${barHtml(t.tire_wear, 5, 'on')}</div>
+      </div>
+      <div class="gdp-stat-cell">
+        <div class="gdp-stat-label">OVERTAKING</div>
+        <div class="gdp-stat-val">${t.overtaking}<span class="gdp-stat-unit">/5</span></div>
+        <div class="gdp-bar-wrap">${barHtml(t.overtaking, 5, 'on-g')}</div>
+      </div>
+      <div class="gdp-stat-cell">
+        <div class="gdp-stat-label">RACE DISTANCE</div>
+        <div class="gdp-stat-val">${((t.laps||0)*(t.length_km||0)).toFixed(1)}<span class="gdp-stat-unit">km</span></div>
+      </div>
+      <div class="gdp-stat-cell">
+        <div class="gdp-stat-label">DRS ZONES</div>
+        <div class="gdp-stat-val">${t.drs_zones}<span class="gdp-stat-unit">zones</span></div>
+      </div>
+    </div>
+
+    <div class="gdp-sc-row">
+      <div class="gdp-sc-label">SAFETY CAR PROBABILITY</div>
+      <div class="gdp-sc-bar"><div class="gdp-sc-fill" style="width:${Math.round((t.sc_prob||0)*100)}%"></div></div>
+      <div class="gdp-sc-pct">${Math.round((t.sc_prob||0)*100)}%</div>
+    </div>
+
+    <div class="gdp-compounds">
+      <span class="gdp-comp-label">COMPOUNDS</span>
+      ${compHtml || '<span style="font-size:9px;color:var(--muted)">—</span>'}
+    </div>
+
+    <div class="gdp-notes">${t.notes || '—'}</div>
+
+    <div class="gdp-actions">
+      <button class="gdp-btn" onclick="switchTab('tracks');_selectedTrackKey='${t.key}';setTimeout(()=>_renderTrackDetail('${t.key}'),200)">
+        &#9678; TRACKS TAB
+      </button>
+      <button class="gdp-btn primary" onclick="switchTab('predictor')">
+        &#9658; PREDICTOR
+      </button>
+    </div>
+  `;
+}
+
+// ── End Globe Page ─────────────────────────────────────────────────────────
+
+// ── Lap Times Page ─────────────────────────────────────────────────────────
+
+let _ltRound = null;
+let _ltView  = 'qual';
+let _ltData  = null;
+let _ltPoles = null;
+let _ltInited = false;
+
+function initLaptimesPage() {
+  _buildLtRoundStrip();
+  if (_ltInited) return;
+  _ltInited = true;
+  // Auto-select last completed race, or fall back to 'last'
+  if (_seasonTracks.length) {
+    const past     = _seasonTracks.filter(t => _trackStatus(t).order === 3);
+    const upcoming = _seasonTracks.filter(t => _trackStatus(t).order === 1);
+    const target   = past[past.length - 1] || upcoming[0];
+    _ltSelectRound(target ? String(target.round) : 'last');
+  } else {
+    _ltSelectRound('last');
+  }
+}
+
+function _buildLtRoundStrip() {
+  const strip = document.getElementById('ltRoundStrip');
+  if (!strip || !_seasonTracks.length) return;
+  strip.innerHTML = _seasonTracks.map(t => {
+    const st    = _trackStatus(t);
+    const color = st.order === 3 ? 'var(--muted)' :
+                  st.order === 1 ? 'var(--accent)' : 'var(--text)';
+    const abbr  = (t.country || t.name || '').toUpperCase().slice(0, 7);
+    return `<button class="lt-round-btn" id="ltRoundBtn${t.round}"
+              onclick="_ltSelectRound('${t.round}')">
+      <span style="color:var(--muted);font-size:8px">R${t.round}</span><br>
+      <span style="color:${color}">${abbr}</span>
+    </button>`;
+  }).join('');
+}
+
+async function _ltSelectRound(round) {
+  _ltRound = String(round);
+  document.querySelectorAll('.lt-round-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('ltRoundBtn' + _ltRound);
+  if (btn) btn.classList.add('active');
+
+  document.getElementById('ltContent').innerHTML =
+    `<div class="lt-loading">&#9632; LOADING R${_ltRound}...</div>`;
+  try {
+    const res = await fetch(`/api/laptimes?round=${_ltRound}`);
+    _ltData   = await res.json();
+    if (_ltData.season_poles && _ltData.season_poles.length)
+      _ltPoles = _ltData.season_poles;
+    // Update race header
+    const hdr = document.getElementById('ltRaceHeader');
+    if (_ltData.race && _ltData.race.raceName) {
+      document.getElementById('ltRaceTitle').textContent =
+        `R${_ltData.race.round} — ${_ltData.race.raceName}`;
+      document.getElementById('ltRaceMeta').textContent  =
+        (_ltData.race.date || '') + (_ltData.race.country ? ' · ' + _ltData.race.country : '');
+      hdr.style.display = 'flex';
+    } else {
+      hdr.style.display = 'none';
+    }
+    _ltSwitchView(_ltView);
+  } catch (e) {
+    document.getElementById('ltContent').innerHTML =
+      `<div class="lt-empty"><div class="lt-empty-icon">&#9888;</div>FAILED TO LOAD<br>
+       <span style="font-size:9px;opacity:.5">Network error — check console</span></div>`;
+  }
+}
+
+function _ltSwitchView(view) {
+  _ltView = view;
+  document.getElementById('ltTabQual').classList.toggle('active',    view === 'qual');
+  document.getElementById('ltTabFastest').classList.toggle('active', view === 'fastest');
+  document.getElementById('ltTabPoles').classList.toggle('active',   view === 'poles');
+  // Hide round strip for poles view (shows all rounds)
+  const sw = document.getElementById('ltRoundStripWrap');
+  if (sw) sw.style.display = view === 'poles' ? 'none' : '';
+
+  if (view === 'qual')    _renderLtQual();
+  if (view === 'fastest') _renderLtFastest();
+  if (view === 'poles') {
+    // If no data loaded yet, fetch 'last' to populate season_poles
+    if (!_ltPoles && !_ltData) {
+      fetch('/api/laptimes?round=last')
+        .then(r => r.json())
+        .then(d => {
+          _ltData  = d;
+          _ltPoles = d.season_poles || [];
+          _renderLtPoles();
+        });
+    } else {
+      _renderLtPoles();
+    }
+  }
+}
+
+function _ltFmtDelta(s, refS) {
+  if (s == null || refS == null) return '—';
+  const d = s - refS;
+  if (d < 0.001) return 'POLE';
+  return '+' + d.toFixed(3) + 's';
+}
+function _ltBarW(s, refS, maxDelta) {
+  if (s == null || refS == null) return 0;
+  return Math.min(100, ((s - refS) / Math.max(maxDelta, 0.5)) * 100);
+}
+
+function _renderLtQual() {
+  const el = document.getElementById('ltContent');
+  if (!_ltData || !_ltData.qualifying || !_ltData.qualifying.length) {
+    el.innerHTML = `<div class="lt-empty">
+      <div class="lt-empty-icon">&#9672;</div>
+      NO QUALIFYING DATA<br>
+      <span style="font-size:9px;opacity:.5">Session has not taken place yet</span>
+    </div>`;
+    return;
+  }
+  const rows   = _ltData.qualifying;
+  const poleS  = rows[0]?.best_s;
+  const worstS = Math.max(...rows.map(r => r.best_s || poleS));
+  const maxD   = Math.max(worstS - poleS, 0.5);
+
+  let html = `<div class="lt-table-wrap"><table class="lt-table">
+    <thead><tr>
+      <th style="width:3px;padding:0"></th>
+      <th>POS</th><th>DRIVER</th><th>TEAM</th>
+      <th>Q1</th><th>Q2</th><th>Q3</th>
+      <th>BEST</th><th>DELTA</th><th>GAP</th>
+    </tr></thead><tbody>`;
+
+  rows.forEach(r => {
+    const pos   = parseInt(r.position || 99);
+    const c     = teamColor(r.team);
+    const pole  = _ltFmtDelta(r.best_s, poleS) === 'POLE';
+    const bw    = _ltBarW(r.best_s, poleS, maxD);
+    const delta = _ltFmtDelta(r.best_s, poleS);
+
+    // Session knockout dividers
+    if (pos === 11) html += `<tr class="lt-divider"><td colspan="10">
+      ── P11–P15 · KNOCKED OUT IN Q2 ─────────────────────────</td></tr>`;
+    if (pos === 16) html += `<tr class="lt-divider"><td colspan="10">
+      ── P16–P20 · KNOCKED OUT IN Q1 ─────────────────────────</td></tr>`;
+
+    // Which session was the "best"?
+    const q1cls = !r.Q3 && !r.Q2 ? (pole ? ' best' : '') : ' dim';
+    const q2cls = !r.Q3 &&  r.Q2 ? (pole ? ' best' : '') : ' dim';
+    const q3cls =  r.Q3           ? (pole ? ' best' : '') : ' dim';
+
+    html += `<tr>
+      <td class="lt-team-bar" style="background:${c}"></td>
+      <td class="lt-pos">${pos}</td>
+      <td>
+        <span class="lt-driver-code">${r.driver || '—'}</span>
+        <div class="lt-driver-name">${r.name || ''}</div>
+      </td>
+      <td style="font-size:9px;color:${c};letter-spacing:1px">${teamName(r.team)}</td>
+      <td class="lt-time${q1cls}">${r.Q1 || '—'}</td>
+      <td class="lt-time${q2cls}">${r.Q2 || '—'}</td>
+      <td class="lt-time${q3cls}">${r.Q3 || '—'}</td>
+      <td class="lt-time${pole ? ' best' : ''}">${r.best || '—'}</td>
+      <td class="lt-delta${pole ? ' pole' : ''}">${pole ? '&#9632; POLE' : delta}</td>
+      <td class="lt-bar-cell">
+        <div class="lt-bar-track">
+          <div class="lt-bar-fill" style="width:${Math.max(4, 100 - bw)}%;background:${c}"></div>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+  el.innerHTML = html;
+}
+
+function _renderLtFastest() {
+  const el = document.getElementById('ltContent');
+  const rows = (_ltData?.fastest_laps || []).filter(r => r.fl_time_s);
+  if (!rows.length) {
+    el.innerHTML = `<div class="lt-empty">
+      <div class="lt-empty-icon">&#9660;</div>
+      NO FASTEST LAP DATA<br>
+      <span style="font-size:9px;opacity:.5">Race has not taken place yet</span>
+    </div>`;
+    return;
+  }
+  const fastestS = rows[0].fl_time_s;
+  const slowestS = Math.max(...rows.map(r => r.fl_time_s));
+  const maxD     = Math.max(slowestS - fastestS, 0.5);
+
+  let html = `<div class="lt-table-wrap"><table class="lt-table">
+    <thead><tr>
+      <th style="width:3px;padding:0"></th>
+      <th>FL RANK</th><th>DRIVER</th><th>TEAM</th>
+      <th>RACE POS</th><th>LAP</th><th>FASTEST LAP</th><th>AVG KPH</th>
+      <th>DELTA</th><th>GAP</th>
+    </tr></thead><tbody>`;
+
+  rows.forEach((r, i) => {
+    const c       = teamColor(r.team);
+    const rank    = i + 1;
+    const isBest  = rank === 1;
+    const bw      = _ltBarW(r.fl_time_s, fastestS, maxD);
+    const delta   = _ltFmtDelta(r.fl_time_s, fastestS);
+    const spd     = r.fl_speed ? (+r.fl_speed).toFixed(1) : '—';
+
+    html += `<tr>
+      <td class="lt-team-bar" style="background:${c}"></td>
+      <td class="lt-pos" style="color:${isBest?'var(--accent)':''}">${isBest ? '&#9733;' : rank}</td>
+      <td>
+        <span class="lt-driver-code">${r.driver || '—'}${isBest ? '<span class="lt-fl-badge">FASTEST</span>' : ''}</span>
+        <div class="lt-driver-name">${r.name || ''}</div>
+      </td>
+      <td style="font-size:9px;color:${c};letter-spacing:1px">${teamName(r.team)}</td>
+      <td class="lt-pos" style="color:var(--text)">${r.race_pos || '—'}</td>
+      <td style="font-size:10px;color:var(--muted)">L${r.fl_lap || '—'}</td>
+      <td class="lt-time${isBest ? ' best' : ''}">${r.fl_time || '—'}</td>
+      <td style="font-size:10px;color:var(--muted)">${spd}</td>
+      <td class="lt-delta${isBest ? ' pole' : ''}">${isBest ? '&#9632; FASTEST' : delta}</td>
+      <td class="lt-bar-cell">
+        <div class="lt-bar-track">
+          <div class="lt-bar-fill" style="width:${Math.max(4, 100 - bw)}%;background:${c}"></div>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+  el.innerHTML = html;
+}
+
+function _renderLtPoles() {
+  const el    = document.getElementById('ltContent');
+  const poles = _ltPoles || _ltData?.season_poles || [];
+  if (!poles.length) {
+    el.innerHTML = `<div class="lt-empty">
+      <div class="lt-empty-icon">&#9670;</div>
+      NO POLE DATA YET<br>
+      <span style="font-size:9px;opacity:.5">No qualifying sessions completed this season</span>
+    </div>`;
+    return;
+  }
+
+  const validTimes = poles.filter(p => p.time_s);
+  const fastestS   = validTimes.length ? Math.min(...validTimes.map(p => p.time_s)) : 0;
+  const slowestS   = validTimes.length ? Math.max(...validTimes.map(p => p.time_s)) : 1;
+  const range      = Math.max(slowestS - fastestS, 0.5);
+
+  let html = `<div class="lt-poles-grid">`;
+  poles.forEach(p => {
+    const c      = teamColor(p.team);
+    const bw     = p.time_s ? Math.round(((slowestS - p.time_s) / range) * 80 + 20) : 50;
+    const dbE    = TRACK_DB.find(t => t.key === p.circuitId);
+    const ctry   = dbE ? dbE.country : '';
+    const label  = (p.raceName || '').replace(' Grand Prix', '').replace(' GP', '');
+    html += `
+      <div class="lt-pole-card" onclick="_ltSelectRound('${p.round}');_ltSwitchView('qual')">
+        <div class="lt-pole-round">R${p.round}&nbsp;·&nbsp;${(p.date || '').slice(0, 7)}</div>
+        <div class="lt-pole-circuit">${label}</div>
+        <div class="lt-pole-country">${ctry}</div>
+        <div class="lt-pole-driver" style="color:${c}">${p.driver}</div>
+        <div class="lt-pole-team">${teamName(p.team)}</div>
+        <div class="lt-pole-time" style="color:${c}">${p.time || '—'}</div>
+        <div class="lt-pole-bar-track">
+          <div class="lt-pole-bar-fill" style="width:${bw}%;background:${c}"></div>
+        </div>
+      </div>`;
+  });
+  html += `</div>`;
+  el.innerHTML = html;
+}
+
+// ── Drivers Page ──────────────────────────────────────────────────────────
+
+let _drvData        = [];   // full fetched driver array
+let _drvInited      = false;
+let _drvExpandedId  = null; // currently expanded driver_id
+
+async function initDriversPage() {
+  if (_drvInited) { _drvFilter(); return; }
+  _drvInited = true;
+  document.getElementById('drvGrid').innerHTML =
+    `<div style="color:var(--muted);font-size:11px;letter-spacing:2px;padding:40px;grid-column:1/-1;text-align:center">LOADING DRIVER DATA...</div>`;
+  try {
+    const res  = await fetch('/api/drivers/stats');
+    _drvData   = await res.json();
+    _drvBuildStrip();
+    _drvFilter();
+  } catch(e) {
+    document.getElementById('drvGrid').innerHTML =
+      `<div style="color:var(--accent);font-size:11px;letter-spacing:2px;padding:40px;grid-column:1/-1;text-align:center">FAILED TO LOAD — ${_esc(e.message)}</div>`;
+  }
+}
+
+function _drvBuildStrip() {
+  if (!_drvData.length) return;
+  const leader = _drvData[0];
+  document.getElementById('drvStripLeader').textContent   = leader.name;
+  document.getElementById('drvStripLeaderPts').textContent = leader.championship_pts + ' pts';
+  const totalWins  = _drvData.reduce((s, d) => s + d.wins, 0);
+  const totalDnfs  = _drvData.reduce((s, d) => s + d.dnfs, 0);
+  const maxRaces   = Math.max(..._drvData.map(d => d.races_started));
+  document.getElementById('drvStripWins').textContent  = totalWins;
+  document.getElementById('drvStripRaces').textContent = maxRaces;
+  document.getElementById('drvStripDnfs').textContent  = totalDnfs;
+}
+
+function _drvFilter() {
+  const q    = (document.getElementById('drvSearch')?.value || '').toLowerCase();
+  const list = q
+    ? _drvData.filter(d =>
+        d.name.toLowerCase().includes(q) ||
+        d.code.toLowerCase().includes(q) ||
+        (d.constructor_id || '').toLowerCase().includes(q) ||
+        teamName(d.constructor_id).toLowerCase().includes(q))
+    : _drvData;
+  _drvRender(list);
+}
+
+function _drvRender(list) {
+  const grid = document.getElementById('drvGrid');
+  if (!list.length) {
+    grid.innerHTML = `<div style="color:var(--muted);font-size:11px;letter-spacing:2px;padding:40px;grid-column:1/-1;text-align:center">NO DRIVERS MATCH</div>`;
+    return;
+  }
+  grid.innerHTML = list.map(d => _drvCard(d)).join('');
+}
+
+function _drvCard(d) {
+  const color  = teamColor(d.constructor_id);
+  const pos    = d.championship_pos;
+  const posCls = pos === 1 ? 'p1' : pos === 2 ? 'p2' : pos === 3 ? 'p3' : '';
+  const isExpanded = d.driver_id === _drvExpandedId;
+
+  // Recent form dots (last 6 races)
+  const dots = (d.recent_form || []).map(r => {
+    if (r.is_dnf) return `<div class="drv-dot dnf" title="R${r.round} DNF">R</div>`;
+    if (r.pos === 1) return `<div class="drv-dot p1" title="R${r.round} P1">1</div>`;
+    if (r.pos <= 3)  return `<div class="drv-dot pod" title="R${r.round} P${r.pos}">${r.pos}</div>`;
+    if (r.pos <= 10) return `<div class="drv-dot pts" title="R${r.round} P${r.pos}">${r.pos}</div>`;
+    return `<div class="drv-dot out" title="R${r.round} P${r.pos}">${r.pos}</div>`;
+  }).join('');
+
+  // Qualifying gap pill
+  const qualPill = d.avg_quali_gap != null
+    ? `<div class="drv-pill quali"><span class="drv-pill-lbl">Q·GAP</span><span class="drv-pill-val">+${d.avg_quali_gap.toFixed(3)}s</span></div>`
+    : '';
+
+  // Expanded detail block
+  const detail = isExpanded ? _drvDetailHTML(d, color) : '';
+
+  return `
+    <div class="drv-card${isExpanded ? ' expanded' : ''}" id="drvc-${d.driver_id}"
+         onclick="_drvToggle('${d.driver_id}')">
+      <div class="drv-card-top">
+        <div class="drv-team-strip" style="background:${color}"></div>
+        <div class="drv-pos-badge ${posCls}">P${pos}</div>
+        <div class="drv-name-block">
+          <div class="drv-name">${_esc(d.name)}</div>
+          <div class="drv-code" style="color:${color}">${_esc(d.code)}${d.number ? ' &nbsp;#'+d.number : ''}</div>
+          <div class="drv-team-name" style="color:${color}">${_esc(teamName(d.constructor_id))}</div>
+        </div>
+        <div class="drv-pts-block">
+          <div class="drv-pts">${d.championship_pts}</div>
+          <div class="drv-pts-lbl">PTS</div>
+        </div>
+      </div>
+
+      <div class="drv-stat-row">
+        ${d.wins  ? `<div class="drv-pill wins"><span class="drv-pill-lbl">W</span><span class="drv-pill-val">${d.wins}</span></div>` : ''}
+        ${d.podiums > 0 ? `<div class="drv-pill pods"><span class="drv-pill-lbl">POD</span><span class="drv-pill-val">${d.podiums}</span></div>` : ''}
+        <div class="drv-pill"><span class="drv-pill-lbl">TOP10</span><span class="drv-pill-val">${d.top10}</span></div>
+        ${d.fastest_laps > 0 ? `<div class="drv-pill fl"><span class="drv-pill-lbl">FL</span><span class="drv-pill-val">${d.fastest_laps}</span></div>` : ''}
+        ${d.dnfs > 0 ? `<div class="drv-pill dnf"><span class="drv-pill-lbl">DNF</span><span class="drv-pill-val">${d.dnfs}</span></div>` : ''}
+        ${qualPill}
+      </div>
+
+      <div class="drv-form-row">
+        <div class="drv-form-lbl">FORM</div>
+        <div class="drv-form-dots">${dots || '<span style="color:var(--muted);font-size:10px">No race data</span>'}</div>
+      </div>
+
+      <div class="drv-detail">${detail}</div>
+    </div>`;
+}
+
+function _drvDetailHTML(d, color) {
+  // Full race result cells
+  const cells = (d.race_history || []).map(r => {
+    const cls = r.is_dnf ? 'rdnf' : r.pos === 1 ? 'rp1' : r.pos <= 3 ? 'rpod' : r.pos <= 10 ? 'rpts' : 'rout';
+    const txt = r.is_dnf ? 'R' : `${r.pos}`;
+    return `<div class="drv-race-cell ${cls}" title="R${r.round} — ${_esc(r.raceName || '')}">${txt}</div>`;
+  }).join('');
+
+  // H2H bar
+  const h2h = d.teammate_h2h || {};
+  const total = h2h.total || 0;
+  const wins  = h2h.wins  || 0;
+  let h2hHTML = '';
+  if (total > 0) {
+    const lPct  = ((wins / total) * 100).toFixed(0);
+    const rPct  = (100 - lPct);
+    // Find teammate
+    const tmData = _drvData.find(x => x.constructor_id === d.constructor_id && x.driver_id !== d.driver_id);
+    const tmName = tmData ? tmData.name.split(' ').pop() : 'TM';
+    h2hHTML = `
+      <div class="drv-h2h-wrap">
+        <div class="drv-h2h-title">QUALI HEAD-TO-HEAD (${total} sessions)</div>
+        <div class="drv-h2h-bar-row">
+          <div class="drv-h2h-name">${_esc(d.name.split(' ').pop())}</div>
+          <div class="drv-h2h-bar-track">
+            <div class="drv-h2h-fill-l" style="width:${lPct}%;background:${color}"></div>
+            <div class="drv-h2h-fill-r" style="width:${rPct}%;background:var(--surface)"></div>
+          </div>
+          <div class="drv-h2h-score" style="color:${color}">${wins}–${total - wins}</div>
+          <div class="drv-h2h-name right">${_esc(tmName)}</div>
+        </div>
+      </div>`;
+  }
+
+  const qualAvg = d.avg_quali_gap != null
+    ? `<div class="drv-quali-avg"><span class="drv-quali-avg-lbl">AVG QUALI GAP TO POLE</span><span class="drv-quali-avg-val">+${d.avg_quali_gap.toFixed(3)}s</span></div>`
+    : '';
+
+  return `
+    <div class="drv-detail-inner">
+      <div class="drv-detail-title">ALL RACES THIS SEASON</div>
+      <div class="drv-race-grid">${cells || '<span style="color:var(--muted);font-size:10px">No race data</span>'}</div>
+      ${h2hHTML}
+      ${qualAvg}
+    </div>`;
+}
+
+function _drvToggle(driverId) {
+  const wasOpen = _drvExpandedId === driverId;
+  _drvExpandedId = wasOpen ? null : driverId;
+  // Re-render only affected cards
+  const q    = (document.getElementById('drvSearch')?.value || '').toLowerCase();
+  const list = q
+    ? _drvData.filter(d => d.name.toLowerCase().includes(q) || d.code.toLowerCase().includes(q) || (d.constructor_id || '').toLowerCase().includes(q) || teamName(d.constructor_id).toLowerCase().includes(q))
+    : _drvData;
+  _drvRender(list);
+  // Scroll expanded card into view
+  if (!wasOpen) {
+    setTimeout(() => {
+      const el = document.getElementById(`drvc-${driverId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }
+}
+
+// ── Overview / Dashboard Page ─────────────────────────────────────────────
+
+let _ovInited   = false;
+let _ovCdTimer  = null;
+let _ovNextTime = null;
+
+async function initOverview() {
+  if (_ovInited) { _ovRefreshCountdown(); return; }
+  _ovInited = true;
+  document.getElementById('ovGrid').innerHTML =
+    `<div style="color:var(--muted);font-size:11px;letter-spacing:2px;padding:40px;grid-column:1/-1;text-align:center">LOADING OVERVIEW...</div>`;
+  try {
+    const [dRes, rRes, hRes] = await Promise.all([
+      fetch('/api/drivers/stats'),
+      fetch('/api/season'),
+      fetch('/api/history'),
+    ]);
+    const drivers = await dRes.json();
+    const rounds  = (await rRes.json()).sort((a, b) => parseInt(a.round) - parseInt(b.round));
+    const history = await hRes.json();
+    _ovBuild(drivers, rounds, history);
+  } catch(e) {
+    document.getElementById('ovGrid').innerHTML =
+      `<div style="color:var(--accent);font-size:11px;padding:40px;grid-column:1/-1;text-align:center">LOAD FAILED: ${_esc(e.message)}</div>`;
+  }
+}
+
+function _ovBuild(drivers, rounds, history) {
+  const grid = document.getElementById('ovGrid');
+
+  // ── Derive data ──────────────────────────────────────────────────────────
+
+  // Next upcoming race
+  const now = new Date();
+  let nextRace = null;
+  for (const r of rounds) {
+    const ts = (r.time || '13:00:00Z').replace('Z', '+00:00');
+    const dt = new Date(`${r.date}T${ts}`);
+    if (dt > now) { nextRace = { ...r, dt }; break; }
+  }
+
+  // Last completed race (max round in any driver's race_history)
+  let lastRoundNum = 0;
+  for (const d of drivers) {
+    for (const r of (d.race_history || [])) {
+      const n = parseInt(r.round) || 0;
+      if (n > lastRoundNum) lastRoundNum = n;
+    }
+  }
+  const lastRound = rounds.find(r => String(r.round) === String(lastRoundNum));
+  // Build last-race positions: driver_id → {pos, is_dnf}
+  const lastRaceResults = [];
+  for (const d of drivers) {
+    const r = (d.race_history || []).find(x => String(x.round) === String(lastRoundNum));
+    if (r) lastRaceResults.push({ name: d.name, constructor_id: d.constructor_id, ...r });
+  }
+  lastRaceResults.sort((a, b) => {
+    if (a.is_dnf && !b.is_dnf) return 1;
+    if (!a.is_dnf && b.is_dnf) return -1;
+    return (a.pos || 99) - (b.pos || 99);
+  });
+
+  // Constructor standings: sum points per team
+  const conMap = {};
+  for (const d of drivers) {
+    const cid = d.constructor_id;
+    if (!conMap[cid]) conMap[cid] = { constructor_id: cid, pts: 0, wins: 0 };
+    conMap[cid].pts  += d.championship_pts;
+    conMap[cid].wins += d.wins;
+  }
+  const constructors = Object.values(conMap).sort((a, b) => b.pts - a.pts);
+  const maxConPts    = constructors[0]?.pts || 1;
+
+  // Season stats: wins leader, FL leader, most DNFs, total rounds done
+  const winsLeader = [...drivers].sort((a, b) => b.wins - a.wins)[0];
+  const flLeader   = [...drivers].sort((a, b) => b.fastest_laps - a.fastest_laps)[0];
+  const dnfMost    = [...drivers].sort((a, b) => b.dnfs - a.dnfs)[0];
+
+  // Latest prediction from history
+  const latestPred = history[0] || null;
+
+  // Completed round abbreviation helper
+  const _abbr = (r) => {
+    if (!r) return '';
+    const w = (r.country || r.circuit || '').replace(/[^A-Za-z ]/g,'').trim().split(/\s+/);
+    return w.length >= 2 ? (w[0][0]+w[1][0]+(w[2]?.[0]||w[1][1]||'')).toUpperCase() : (r.country||'').slice(0,3).toUpperCase();
+  };
+
+  // ── Render cards ──────────────────────────────────────────────────────────
+
+  // 1. NEXT RACE (full width top)
+  const nextCard = _ovNextRaceCard(nextRace, rounds);
+
+  // 2. DRIVER STANDINGS (top 8)
+  const champCard = _ovCard('DRIVER STANDINGS', `${drivers.length} DRIVERS`, _ovChampHTML(drivers.slice(0, 8)));
+
+  // 3. CONSTRUCTOR STANDINGS
+  const conCard = _ovCard('CONSTRUCTORS', `${constructors.length} TEAMS`, _ovConHTML(constructors.slice(0, 10), maxConPts));
+
+  // 4. SEASON STATS
+  const statsCard = _ovCard('SEASON STATISTICS', lastRoundNum ? `R${lastRoundNum} COMPLETED` : 'PRE-SEASON', _ovStatsHTML(drivers, winsLeader, flLeader, dnfMost, lastRoundNum));
+
+  // 5. LAST RACE RESULTS
+  const lastCard = _ovCard(
+    lastRound ? `R${lastRoundNum} — ${(lastRound.name||'').replace(' Grand Prix',' GP')}` : 'LAST RACE',
+    lastRound ? lastRound.date : '',
+    lastRaceResults.length ? _ovLastRaceHTML(lastRaceResults.slice(0,8)) : '<div class="ov-pred-empty">No completed races yet</div>'
+  );
+
+  // 6. LATEST PREDICTION
+  const predCard = _ovCard('LATEST PREDICTION', latestPred ? latestPred.race_name || '' : 'NONE YET', _ovPredHTML(latestPred));
+
+  // 7. MINI SEASON GRID (full width)
+  const miniCard = _ovMiniGridCard(drivers, rounds, lastRoundNum);
+
+  grid.innerHTML = `
+    ${nextCard}
+    ${champCard}
+    ${conCard}
+    ${statsCard}
+    ${lastCard}
+    ${predCard}
+    ${miniCard}`;
+
+  // Animate bars
+  requestAnimationFrame(() => requestAnimationFrame(animateBars));
+
+  // Start countdown
+  if (nextRace) {
+    _ovNextTime = nextRace.dt;
+    _ovRefreshCountdown();
+    if (_ovCdTimer) clearInterval(_ovCdTimer);
+    _ovCdTimer = setInterval(_ovRefreshCountdown, 1000);
+  }
+}
+
+function _ovCard(title, badge, bodyHTML) {
+  return `
+    <div class="ov-card">
+      <div class="ov-card-head">
+        <div class="ov-card-title">${_esc(title)}</div>
+        <div class="ov-card-badge">${_esc(badge)}</div>
+      </div>
+      <div class="ov-card-body">${bodyHTML}</div>
+    </div>`;
+}
+
+function _ovNextRaceCard(nextRace, rounds) {
+  if (!nextRace) return `
+    <div class="ov-card ov-span-3">
+      <div class="ov-card-head"><div class="ov-card-title">NEXT RACE</div><div class="ov-card-badge">SEASON COMPLETE</div></div>
+      <div class="ov-card-body"><div class="ov-pred-empty">Season finished — no upcoming races.</div></div>
+    </div>`;
+
+  const roundsDone = rounds.filter(r => {
+    const ts = (r.time || '13:00:00Z').replace('Z','+00:00');
+    return new Date(`${r.date}T${ts}`) < new Date();
+  }).length;
+
+  const trackInfo = TRACK_DB.find(t =>
+    (nextRace.circuitId || '').includes(t.key) || t.key === (nextRace.circuitId || ''));
+
+  return `
+    <div class="ov-card ov-span-3" style="border-color:rgba(225,6,0,.35)">
+      <div class="ov-card-head" style="background:rgba(225,6,0,.08)">
+        <div class="ov-card-title" style="color:var(--accent)">&#9670; NEXT RACE — ROUND ${nextRace.round}</div>
+        <div class="ov-card-badge" style="border-color:var(--accent);color:var(--accent)">${roundsDone}/${rounds.length} COMPLETE</div>
+      </div>
+      <div class="ov-card-body">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start">
+          <div>
+            <div class="ov-race-name">${_esc((nextRace.name||'').replace(' Grand Prix', ' Grand Prix'))}</div>
+            <div class="ov-race-meta">${_esc(nextRace.circuit||'')} &nbsp;·&nbsp; ${_esc(nextRace.country||'')} &nbsp;·&nbsp; ${nextRace.date||''}</div>
+            ${trackInfo ? `<div class="ov-weather-strip">
+              <div class="ov-w-pill"><span class="ov-w-label">LAPS</span>${trackInfo.laps}</div>
+              <div class="ov-w-pill"><span class="ov-w-label">CIRCUIT</span>${trackInfo.length_km} km</div>
+              <div class="ov-w-pill"><span class="ov-w-label">TIRE WEAR</span>${['','LOW','LOW','MED','HIGH','XTRM'][trackInfo.tire_wear]}</div>
+              <div class="ov-w-pill"><span class="ov-w-label">SC PROB</span>${(trackInfo.sc_prob*100).toFixed(0)}%</div>
+              <div class="ov-w-pill"><span class="ov-w-label">DRS ZONES</span>${trackInfo.drs_zones}</div>
+            </div>` : ''}
+          </div>
+          <div>
+            <div class="ov-countdown-row" id="ovCdRow">
+              <div class="ov-cd-cell"><div class="ov-cd-num" id="ovCdD">—</div><div class="ov-cd-lbl">Days</div></div>
+              <div class="ov-cd-cell"><div class="ov-cd-num" id="ovCdH">—</div><div class="ov-cd-lbl">Hrs</div></div>
+              <div class="ov-cd-cell"><div class="ov-cd-num" id="ovCdM">—</div><div class="ov-cd-lbl">Min</div></div>
+              <div class="ov-cd-cell"><div class="ov-cd-num" id="ovCdS">—</div><div class="ov-cd-lbl">Sec</div></div>
+            </div>
+            <button class="db-replay-btn" style="width:100%;font-size:10px;padding:6px" onclick="switchTab('predictor')">&#9654; PREDICT THIS RACE</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function _ovRefreshCountdown() {
+  if (!_ovNextTime) return;
+  const diff = _ovNextTime - new Date();
+  if (diff <= 0) { initOverview(); return; }
+  const d = Math.floor(diff / 86400000);
+  const h = Math.floor((diff % 86400000) / 3600000);
+  const m = Math.floor((diff % 3600000)  / 60000);
+  const s = Math.floor((diff % 60000)    / 1000);
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v).padStart(2,'0'); };
+  set('ovCdD', d); set('ovCdH', h); set('ovCdM', m); set('ovCdS', s);
+}
+
+function _ovChampHTML(drivers) {
+  const MEDALS = ['#e10600','#aaa','#cd7f32'];
+  return drivers.map(d => {
+    const c   = teamColor(d.constructor_id);
+    const medal = MEDALS[d.championship_pos - 1] || '';
+    return `
+      <div class="ov-champ-row">
+        <div class="ov-champ-pos" style="${medal ? 'color:'+medal : ''}">${d.championship_pos}</div>
+        <div class="ov-champ-strip" style="background:${c}"></div>
+        <div class="ov-champ-driver">
+          <div class="ov-champ-name">${_esc(d.name)}</div>
+          <div class="ov-champ-team" style="color:${c}">${_esc(teamName(d.constructor_id))}</div>
+        </div>
+        <div class="ov-champ-pts">${d.championship_pts}</div>
+      </div>`;
+  }).join('');
+}
+
+function _ovConHTML(cons, maxPts) {
+  return cons.map((c, i) => {
+    const color = teamColor(c.constructor_id);
+    const barW  = ((c.pts / maxPts) * 100).toFixed(1);
+    return `
+      <div class="ov-con-row">
+        <div class="ov-con-pos">${i+1}</div>
+        <div class="ov-con-name" style="color:${color}">${_esc(teamName(c.constructor_id))}</div>
+        <div class="ov-con-bar-wrap">
+          <div class="ov-con-bar" data-width="${barW}" style="width:0;background:${color}"></div>
+        </div>
+        <div class="ov-con-pts">${c.pts}</div>
+      </div>`;
+  }).join('');
+}
+
+function _ovStatsHTML(drivers, winsLeader, flLeader, dnfMost, roundsDone) {
+  const totalRaces = drivers.reduce((s, d) => s + d.races_started, 0);
+  const totalDnfs  = drivers.reduce((s, d) => s + d.dnfs, 0);
+  const totalFl    = drivers.reduce((s, d) => s + d.fastest_laps, 0);
+  const dnfRate    = totalRaces > 0 ? ((totalDnfs / totalRaces) * 100).toFixed(1) : '—';
+  const topPoler   = [...drivers].sort((a, b) => (a.avg_quali_gap ?? 99) - (b.avg_quali_gap ?? 99))[0];
+
+  return `<div class="ov-stat-grid">
+    <div class="ov-stat-cell">
+      <div class="ov-stat-lbl">WINS LEADER</div>
+      <div class="ov-stat-val" style="color:var(--accent)">${winsLeader?.wins ?? '—'}</div>
+      <div class="ov-stat-sub">${_esc(winsLeader?.name?.split(' ').pop() ?? '—')}</div>
+    </div>
+    <div class="ov-stat-cell">
+      <div class="ov-stat-lbl">FASTEST LAPS</div>
+      <div class="ov-stat-val" style="color:#9b59b6">${flLeader?.fastest_laps ?? '—'}</div>
+      <div class="ov-stat-sub">${_esc(flLeader?.name?.split(' ').pop() ?? '—')}</div>
+    </div>
+    <div class="ov-stat-cell">
+      <div class="ov-stat-lbl">BEST QUALI AVG</div>
+      <div class="ov-stat-val" style="color:#4fc3f7">${topPoler?.avg_quali_gap != null ? '+'+topPoler.avg_quali_gap.toFixed(3)+'s' : '—'}</div>
+      <div class="ov-stat-sub">${_esc(topPoler?.name?.split(' ').pop() ?? '—')}</div>
+    </div>
+    <div class="ov-stat-cell">
+      <div class="ov-stat-lbl">DNF RATE</div>
+      <div class="ov-stat-val" style="color:var(--accent)">${dnfRate}%</div>
+      <div class="ov-stat-sub">${totalDnfs} total · ${roundsDone} races done</div>
+    </div>
+  </div>`;
+}
+
+function _ovLastRaceHTML(results) {
+  const MEDALS = ['🥇','🥈','🥉'];
+  return results.map((r, i) => {
+    const c = teamColor(r.constructor_id);
+    return `
+      <div class="ov-podium-row">
+        <div class="ov-pod-strip" style="background:${c}"></div>
+        <div class="ov-pod-medal">${r.is_dnf ? '✕' : (MEDALS[i] || `P${r.pos}`)}</div>
+        <div style="flex:1">
+          <div class="ov-pod-name" style="${r.is_dnf ? 'color:var(--muted);text-decoration:line-through' : ''}">${_esc(r.name)}</div>
+          <div class="ov-pod-team" style="color:${c}">${_esc(teamName(r.constructor_id))}</div>
+        </div>
+        ${r.is_dnf ? '<div style="font-size:9px;color:var(--accent)">DNF</div>' : ''}
+      </div>`;
+  }).join('');
+}
+
+function _ovPredHTML(pred) {
+  if (!pred) {
+    return `<div class="ov-pred-empty">No predictions saved yet.<br>
+      <button class="db-replay-btn" style="margin-top:8px;font-size:10px" onclick="switchTab('predictor')">&#9654; RUN FIRST PREDICTION</button>
+    </div>`;
+  }
+  const top5 = pred.top5 || [];
+  const maxP = top5[0]?.win_prob || 0.01;
+  const rows = top5.slice(0, 5).map((d, i) => {
+    const c   = teamColor(d.constructor_id || '');
+    const barW = ((d.win_prob / maxP) * 100).toFixed(1);
+    return `
+      <div class="ov-pred-row">
+        <div class="ov-pred-pos">P${i+1}</div>
+        <div class="ov-pred-name">
+          <div style="font-size:11px;font-weight:600">${_esc((d.name||'').split(' ').pop())}</div>
+          <div style="font-size:9px;color:${c}">${_esc(teamName(d.constructor_id||''))}</div>
+        </div>
+        <div class="ov-pred-bar-wrap"><div class="ov-pred-bar" data-width="${barW}" style="width:0;background:${c}"></div></div>
+        <div class="ov-pred-pct" style="color:${c}">${(d.win_prob*100).toFixed(1)}%</div>
+      </div>`;
+  }).join('');
+  const ts = pred.created_at ? pred.created_at.replace('T',' ').slice(0,16) : '';
+  return `
+    <div class="ov-pred-race">${_esc(pred.race_name || pred.circuit || '?')}</div>
+    ${rows}
+    <div class="ov-pred-ts">${ts} &nbsp;·&nbsp; <span style="cursor:pointer;color:var(--accent)" onclick="switchTab('database')">view all predictions</span></div>`;
+}
+
+function _ovMiniGridCard(drivers, rounds, lastRoundNum) {
+  const completed = rounds.filter(r => parseInt(r.round) <= lastRoundNum);
+  if (!completed.length) {
+    return `<div class="ov-card ov-span-3">
+      <div class="ov-card-head"><div class="ov-card-title">SEASON GRID</div><div class="ov-card-badge">NO DATA YET</div></div>
+      <div class="ov-card-body"><div class="ov-pred-empty">No completed races.</div></div>
+    </div>`;
+  }
+
+  // Build result lookup
+  const rmap = {};
+  for (const d of drivers) {
+    rmap[d.driver_id] = {};
+    for (const r of (d.race_history || [])) rmap[d.driver_id][String(r.round)] = r;
+  }
+
+  const _abbr = (r) => {
+    const w = (r.country||r.circuit||'').replace(/[^A-Za-z ]/g,'').trim().split(/\s+/);
+    return w.length>=2 ? (w[0][0]+w[1][0]+(w[2]?.[0]||w[1][1]||'')).toUpperCase() : (r.country||'').slice(0,3).toUpperCase();
+  };
+
+  let thead = '<thead><tr><th style="text-align:left;padding:2px 6px 2px 0;font-size:8px;color:var(--muted)">DRIVER</th>';
+  for (const r of completed) thead += `<th>${_abbr(r)}<br>R${r.round}</th>`;
+  thead += '<th style="padding:2px 8px;font-size:9px;color:var(--muted)">PTS</th></tr></thead>';
+
+  let tbody = '<tbody>';
+  for (const d of drivers.slice(0, 10)) {
+    const c = teamColor(d.constructor_id);
+    let row = `<tr><td class="ov-mini-driver" style="border-left:2px solid ${c}">
+      <span style="font-size:9px;font-weight:700">${_esc(d.name.split(' ').pop())}</span>
+    </td>`;
+    for (const r of completed) {
+      const res = rmap[d.driver_id]?.[String(r.round)];
+      if (!res) { row += `<td class="ov-mini-cell omc-fut">—</td>`; continue; }
+      let cls, txt;
+      if (res.is_dnf)    { cls='omc-dnf'; txt='R'; }
+      else if (res.pos===1) { cls='omc-p1'; txt='1'; }
+      else if (res.pos<=3)  { cls='omc-pod'; txt=res.pos; }
+      else if (res.pos<=10) { cls='omc-pts'; txt=res.pos; }
+      else                  { cls='omc-out'; txt=res.pos; }
+      row += `<td class="ov-mini-cell ${cls}">${txt}</td>`;
+    }
+    row += `<td style="font-size:10px;font-weight:700;padding:2px 8px;text-align:center">${d.championship_pts}</td></tr>`;
+    tbody += row;
+  }
+  tbody += '</tbody>';
+
+  return `
+    <div class="ov-card ov-span-3">
+      <div class="ov-card-head">
+        <div class="ov-card-title">SEASON AT A GLANCE — TOP 10 DRIVERS</div>
+        <div class="ov-card-badge">${completed.length} ROUNDS</div>
+      </div>
+      <div class="ov-card-body">
+        <div class="ov-mini-grid">
+          <table class="ov-mini-table">${thead}${tbody}</table>
+        </div>
+        <div style="margin-top:8px;text-align:right">
+          <span style="font-size:9px;color:var(--muted);cursor:pointer" onclick="switchTab('season')">&#9654; FULL SEASON MATRIX</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── End Overview Page ──────────────────────────────────────────────────────
+
+// ── End Drivers Page ───────────────────────────────────────────────────────
+
+// ── Season Results Matrix ──────────────────────────────────────────────────
+
+let _srInited   = false;
+let _srDrivers  = [];   // from /api/drivers/stats
+let _srRounds   = [];   // from /api/season (sorted by round)
+let _srHighCol  = -1;   // currently highlighted column index
+
+async function initSeasonMatrix() {
+  if (_srInited) return;
+  _srInited = true;
+  document.getElementById('srOuter').innerHTML =
+    `<div style="color:var(--muted);font-size:11px;letter-spacing:2px;padding:40px;text-align:center">LOADING SEASON DATA...</div>`;
+  try {
+    const [dRes, rRes] = await Promise.all([
+      fetch('/api/drivers/stats'),
+      fetch('/api/season'),
+    ]);
+    _srDrivers = await dRes.json();
+    const allRounds = await rRes.json();
+    // Only keep rounds that have at least one driver result (completed) or are scheduled
+    _srRounds  = allRounds.sort((a, b) => parseInt(a.round) - parseInt(b.round));
+    _buildSeasonTable();
+  } catch(e) {
+    document.getElementById('srOuter').innerHTML =
+      `<div style="color:var(--accent);font-size:11px;letter-spacing:2px;padding:40px;text-align:center">FAILED: ${_esc(e.message)}</div>`;
+  }
+}
+
+function _buildSeasonTable() {
+  if (!_srDrivers.length || !_srRounds.length) return;
+
+  // Build lookup: driver_id → { round_str → result }
+  const resultMap = {};
+  for (const d of _srDrivers) {
+    resultMap[d.driver_id] = {};
+    for (const r of (d.race_history || [])) {
+      resultMap[d.driver_id][String(r.round)] = r;
+    }
+  }
+
+  // Determine which rounds have any results (show completed rounds + future placeholders)
+  const completedRounds = new Set();
+  for (const d of _srDrivers) {
+    for (const r of (d.race_history || [])) {
+      completedRounds.add(String(r.round));
+    }
+  }
+
+  // Circuit abbreviation helper (first 3 meaningful chars of country)
+  const _abbr = (r) => {
+    const ctry = (r.country || r.circuit || '').replace(/[^A-Za-z ]/g, '');
+    const words = ctry.trim().split(/\s+/);
+    if (words.length >= 2) return (words[0][0] + words[1][0] + (words[2]?.[0] || words[1][1] || '')).toUpperCase();
+    return ctry.slice(0, 3).toUpperCase();
+  };
+
+  // ── Build HTML ────────────────────────────────────────────────────────────
+
+  let thead = `<thead><tr>
+    <th class="sr-th-driver">DRIVER</th>`;
+  _srRounds.forEach((r, ci) => {
+    const abbr = _abbr(r);
+    const done = completedRounds.has(String(r.round));
+    thead += `<th class="sr-th-round" id="srch-${ci}">
+      <div class="sr-th-round-inner" style="color:${done ? 'var(--text)' : 'var(--border)'}">
+        R${r.round}<br>${abbr}
+      </div></th>`;
+  });
+  thead += `<th class="sr-th-pts">PTS</th></tr></thead>`;
+
+  let tbody = '<tbody>';
+  for (const d of _srDrivers) {
+    const color = teamColor(d.constructor_id);
+    const rmap  = resultMap[d.driver_id] || {};
+    const posCls = d.championship_pos === 1 ? 'style="color:var(--accent)"'
+                 : d.championship_pos <= 3 ? 'style="color:#aaa"' : '';
+
+    let row = `<tr>
+      <td class="sr-td-driver">
+        <div class="sr-driver-inner">
+          <div class="sr-driver-strip" style="background:${color}"></div>
+          <div>
+            <div class="sr-driver-pos" ${posCls}>P${d.championship_pos}</div>
+          </div>
+          <div>
+            <div class="sr-driver-name">${_esc(d.name.split(' ').pop())}</div>
+            <div class="sr-driver-code" style="color:${color}">${_esc(d.code)}</div>
+          </div>
+        </div>
+      </td>`;
+
+    _srRounds.forEach((r, ci) => {
+      const rnd = String(r.round);
+      const res = rmap[rnd];
+      if (!res) {
+        // Future round or driver didn't participate
+        const done = completedRounds.has(rnd);
+        row += `<td class="sr-cell src-empty" data-ci="${ci}" onmouseenter="_srHover(event,${ci},'${_esc(r.raceName||r.circuit||'')}','','','')" onmouseleave="_srUnhover()">${done ? '—' : ''}</td>`;
+        return;
+      }
+      let cls, txt;
+      if (res.is_dnf) { cls = 'src-dnf'; txt = 'R'; }
+      else if (res.pos === 1) { cls = 'src-p1'; txt = '1'; }
+      else if (res.pos === 2) { cls = 'src-p2'; txt = '2'; }
+      else if (res.pos === 3) { cls = 'src-p3'; txt = '3'; }
+      else if (res.pos <= 10) { cls = 'src-pts'; txt = res.pos; }
+      else                    { cls = 'src-out'; txt = res.pos; }
+      const flMark = (String(res.fl_rank) === '1') ? '<span class="sr-fl-dot"></span>' : '';
+      const flCls  = (String(res.fl_rank) === '1') ? ' src-fl' : '';
+      const raceLbl = _esc(r.raceName || r.circuit || `R${r.round}`);
+      const posLbl  = res.is_dnf ? 'DNF' : `P${res.pos}`;
+      row += `<td class="sr-cell ${cls}${flCls}" data-ci="${ci}"
+        onmouseenter="_srHover(event,${ci},'${raceLbl}','${posLbl}','${_esc(d.name)}','${String(res.fl_rank) === '1' ? 'FL' : ''}')"
+        onmouseleave="_srUnhover()">${txt}${flMark}</td>`;
+    });
+
+    row += `<td class="sr-td-pts">${d.championship_pts}</td></tr>`;
+    tbody += row;
+  }
+  tbody += '</tbody>';
+
+  document.getElementById('srOuter').innerHTML =
+    `<table class="sr-table">${thead}${tbody}</table>`;
+}
+
+function _srHover(e, ci, race, pos, driver, fl) {
+  // Column highlight
+  if (_srHighCol !== ci) {
+    document.querySelectorAll('.sr-col-highlight').forEach(el => el.classList.remove('sr-col-highlight'));
+    document.querySelectorAll(`[data-ci="${ci}"]`).forEach(el => el.classList.add('sr-col-highlight'));
+    const hdr = document.getElementById(`srch-${ci}`);
+    if (hdr) hdr.classList.add('sr-col-highlight');
+    _srHighCol = ci;
+  }
+  // Tooltip
+  const tt = document.getElementById('srTooltip');
+  if (!pos) { tt.style.display = 'none'; return; }
+  const flLine = fl ? `<div style="color:#9b59b6">&#9679; Fastest Lap</div>` : '';
+  tt.innerHTML = `<div style="font-weight:700;color:var(--text)">${race}</div>
+    <div style="color:var(--muted)">${driver}</div>
+    <div style="font-weight:700;margin-top:2px">${pos}</div>${flLine}`;
+  tt.style.display = 'block';
+  const rect = e.target.getBoundingClientRect();
+  const x = Math.min(rect.left + 18, window.innerWidth - 210);
+  const y = rect.top - 80;
+  tt.style.left = x + 'px';
+  tt.style.top  = (y < 8 ? rect.bottom + 4 : y) + 'px';
+}
+
+function _srUnhover() {
+  document.getElementById('srTooltip').style.display = 'none';
+}
+
+// ── End Season Matrix ──────────────────────────────────────────────────────
 
 loadRaces();
 checkLiveSession();

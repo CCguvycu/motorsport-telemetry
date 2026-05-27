@@ -64,7 +64,8 @@ def compute_form(driver_id: str, season_results: List[Dict], n: int = 6) -> floa
             if result.get("Driver", {}).get("driverId") == driver_id:
                 pos = result.get("position", "20")
                 status = result.get("status", "")
-                if "DNF" in status or "Retired" in status or "Accident" in status:
+                if any(x in status for x in ("DNF", "Retired", "Accident", "Engine",
+                                        "Gearbox", "Hydraulics", "Electrical", "Collision")):
                     finishes.append(20)
                 else:
                     try:
@@ -116,6 +117,44 @@ def compute_track_affinity(driver_id: str, circuit_id: str,
     return (top3 / total) if total > 0 else 0.0
 
 
+# ── Season qualifying form ────────────────────────────────────────────────
+
+def compute_quali_form(driver_id: str, season_qualifying: List[Dict], n: int = 5) -> Optional[float]:
+    """
+    Weighted average gap-to-pole across the driver's last N qualifying sessions.
+    Returns seconds (0.0 = pole pace), or None if no data available.
+    Recency-weighted: most recent session counts 2x.
+    """
+    gaps: List[float] = []
+    for race in season_qualifying:          # already sorted newest-first
+        results = race.get("QualifyingResults", [])
+        if not results:
+            continue
+        pole_time: Optional[float] = None
+        for q in results:
+            t = q.get("Q3") or q.get("Q2") or q.get("Q1", "")
+            sec = _parse_time(t)
+            if sec is not None and (pole_time is None or sec < pole_time):
+                pole_time = sec
+        if pole_time is None:
+            continue
+        for q in results:
+            if q.get("Driver", {}).get("driverId") == driver_id:
+                t = q.get("Q3") or q.get("Q2") or q.get("Q1", "")
+                sec = _parse_time(t)
+                if sec is not None:
+                    gaps.append(sec - pole_time)
+                break
+        if len(gaps) >= n:
+            break
+
+    if not gaps:
+        return None
+
+    weights = [2.0, 1.5, 1.2, 1.0, 0.9][: len(gaps)]
+    return sum(g * w for g, w in zip(gaps, weights)) / sum(weights)
+
+
 # ── Qualifying pace proxy when quali data isn't available ─────────────────
 
 def position_to_pace_gap(championship_position: int, total_drivers: int = 20) -> float:
@@ -139,6 +178,7 @@ def build_factors(
     circuit_id: str,
     weather: Dict,
     track: Dict,
+    season_qualifying: Optional[List[Dict]] = None,
 ) -> List[Dict]:
     """
     Return a list of factor dicts, one per driver in the standings.
@@ -161,7 +201,7 @@ def build_factors(
             sec = _parse_time(t)
             if sec is not None and (pole_time is None or sec < pole_time):
                 pole_time = sec
-        if pole_time:
+        if pole_time is not None:
             for q in qualifying_results:
                 did = q["Driver"]["driverId"]
                 t = (q.get("Q3") or q.get("Q2") or q.get("Q1") or "")
@@ -169,10 +209,14 @@ def build_factors(
                 if sec is not None:
                     quali_map[did] = sec - pole_time
 
-    # Tire temperature modifier: how far track temp is from each compound's optimum
-    track_temp   = weather.get("track_temp", 40.0)
+    # Tire temperature modifier: how far track temp is from each compound's optimum.
+    # IMPORTANT: compound windows are tire OPERATING temps (~70-135°C), not surface temps.
+    # Estimate operating temp: tire_op ≈ track_temp * 1.8 + air_temp * 0.4 + 18 (empirical)
+    track_temp    = weather.get("track_temp", 40.0)
+    air_temp      = weather.get("air_temp", 22.0)
+    tire_op_temp  = round(track_temp * 1.8 + air_temp * 0.4 + 18, 1)
     compounds    = track.get("compounds", ["C2", "C3", "C4"])
-    best_compound = _best_compound(compounds, track_temp)
+    best_compound = _best_compound(compounds, tire_op_temp)
 
     factors = []
     for s in driver_standings:
@@ -190,18 +234,26 @@ def build_factors(
         reliability= compute_reliability(did, season_results)
         affinity   = compute_track_affinity(did, circuit_id, circuit_history)
 
-        # Base pace: qualifying gap if available, otherwise use championship proxy
+        # Base pace priority: round quali > season quali form > championship proxy
         if did in quali_map:
-            base_pace  = quali_map[did]
-            pace_source= "qualifying"
+            base_pace   = quali_map[did]
+            pace_source = "qualifying"
+        elif season_qualifying:
+            qf = compute_quali_form(did, season_qualifying)
+            if qf is not None:
+                base_pace   = qf
+                pace_source = "quali_form"
+            else:
+                base_pace   = position_to_pace_gap(champ_pos)
+                pace_source = "championship"
         else:
-            base_pace  = position_to_pace_gap(champ_pos)
-            pace_source= "championship"
+            base_pace   = position_to_pace_gap(champ_pos)
+            pace_source = "championship"
 
         # Tire management modifier on base pace
         tire_skill = ratings["tire"] / 10.0  # 0-1
         # Temp penalty: tire outside optimal window costs lap time
-        temp_penalty = _tire_temp_penalty(best_compound, track_temp, track.get("tire_wear", 3))
+        temp_penalty = _tire_temp_penalty(best_compound, tire_op_temp, track.get("tire_wear", 3))
 
         # Altitude modifier (Mexico, etc.)
         altitude_factor = _altitude_factor(track.get("lat", 0), track.get("lon", 0))

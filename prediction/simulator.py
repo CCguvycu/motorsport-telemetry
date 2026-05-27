@@ -91,7 +91,7 @@ def simulate(
     track: Dict,
     weather: Dict,
     n_sims: int = N_SIMS,
-    rng_seed: int = 42,
+    rng_seed: int = None,
 ) -> List[Dict]:
     """
     Run Monte Carlo simulation.
@@ -130,7 +130,7 @@ def simulate(
     car_gap_total = car_ceiling * n_laps * RACE_PACE_FACTOR
 
     # Base pace scaled by race compression factor + blended with car ceiling anchor
-    has_quali = np.array([f.get("pace_source") == "qualifying" for f in factors], dtype=float)
+    has_quali = np.array([f.get("pace_source") in ("qualifying", "quali_form") for f in factors], dtype=float)
     # Qualifying-data drivers: mostly trust their qualifying gap (compressed to race scale)
     # Championship-proxy drivers: blend with car ceiling more heavily
     quali_component = base_pace * n_laps * RACE_PACE_FACTOR
@@ -210,7 +210,7 @@ def simulate(
         # 8. Rain event — non-linear reshuffle via wet skill
         if rng.random() < rain_prob:
             # Wet advantage: elite wet driver gains up to ~15s vs. poor wet driver
-            wet_offset = (0.5 - wet_skill) * 0.20 * pace   # percentage modifier
+            wet_offset = (0.5 - wet_skill) * 20.0   # fixed ±10s spread across wet-skill range
             rain_noise = rng.normal(0.0, 10.0, n)           # chaotic rain variance
             pace = pace + wet_offset + rain_noise
 

@@ -22,7 +22,7 @@ def get_active_session() -> Optional[Dict]:
     Return the most recent Race session object, or None if nothing active.
     OpenF1 'session_key=latest' always returns the most recent session.
     """
-    data = _get(f"{OPENF1}/sessions?session_type=Race&year=2025")
+    data = _get(f"{OPENF1}/sessions?session_type=Race&year={datetime.now().year}")
     if not data:
         return None
     # Sort by date_end descending; pick the most recent
@@ -101,7 +101,7 @@ def get_live_state(session_key: str) -> Dict:
         else:
             try:
                 gaps[dn] = float(str(raw_gap).replace("+", "").replace("LAP", "").strip()) * (
-                    60.0 if "LAP" in str(raw_gap) else 1.0
+                    90.0 if "LAP" in str(raw_gap) else 1.0
                 )
             except (ValueError, TypeError):
                 gaps[dn] = 999.0    # lapped / unknown
@@ -302,11 +302,11 @@ def get_race_feed(session_key: str) -> List[Dict]:
         for i in range(1, len(samples)):
             prev_pos = samples[i-1].get("position", 99)
             curr_pos = samples[i].get("position", 99)
-            if isinstance(prev_pos, int) and isinstance(curr_pos, int) and curr_pos < prev_pos - 0:
+            if isinstance(prev_pos, int) and isinstance(curr_pos, int) and curr_pos < prev_pos:
                 gained = prev_pos - curr_pos
                 if gained >= 1:
                     acr = dn_to_acr.get(dn, f"#{dn}")
-                    lap = samples[i].get("lap", "?")  # position endpoint may not have lap
+                    lap = samples[i].get("lap_number", "?")
                     ts  = samples[i].get("date", "")
                     events.append({
                         "type":      "OVERTAKE",
@@ -395,7 +395,9 @@ def apply_live_overrides(
 
         # ── Safety car: compress all gaps ─────────────────────────────────────
         if sc_active or vsc_active:
-            f2["base_pace"] = f2.get("base_pace", 0.0) * 0.4  # SC neutralises 60% of gap
+            bp = f2.get("base_pace", 0.0)
+            if bp < 900.0:  # don't compress DNF sentinel (999)
+                f2["base_pace"] = bp * 0.4  # SC neutralises 60% of gap
 
         updated.append(f2)
 

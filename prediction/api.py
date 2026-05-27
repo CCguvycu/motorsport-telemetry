@@ -81,6 +81,13 @@ def get_qualifying(year: str = "current", rnd: str = "last") -> List[Dict]:
     return races[0].get("QualifyingResults", []) if races else []
 
 
+def get_season_qualifying(year: str = "current") -> List[Dict]:
+    """All qualifying sessions for the season, newest first (all drivers, all rounds)."""
+    d = _get(f"{JOLPICA}/{year}/qualifying.json?limit=500")
+    races = (d or {}).get("MRData", {}).get("RaceTable", {}).get("Races", [])
+    return list(reversed(races))  # most recent first for weighted lookups
+
+
 def get_circuit_history(circuit_id: str, seasons: int = 5) -> List[Dict]:
     """Last N years of results at this circuit."""
     current_year = date.today().year

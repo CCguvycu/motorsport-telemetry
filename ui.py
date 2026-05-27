@@ -30,6 +30,7 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "f1-predictor")
 # Input validation — allowlist patterns
 _ROUND_RE       = re.compile(r'^(last|\d{1,3})$')
 _SESSION_KEY_RE = re.compile(r'^(latest|\d{1,8})$')
+_YEAR_RE        = re.compile(r'^(current|\d{4})$')
 
 
 def _ntfy_push(title: str, body: str, tags: str = "racing,checkered_flag", priority: int = 3) -> bool:
@@ -66,6 +67,10 @@ def _security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-XSS-Protection"] = "0"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=()"
+    )
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' cdn.jsdelivr.net unpkg.com; "
@@ -77,7 +82,7 @@ def _security_headers(response):
     return response
 
 # ── SQLite history database ───────────────────────────────────────────────────
-DB_PATH = Path(__file__).parent / "predictions.db"
+DB_PATH = Path(os.environ.get("DB_PATH", str(Path(__file__).parent / "predictions.db")))
 
 def _db():
     conn = sqlite3.connect(DB_PATH)
@@ -226,9 +231,165 @@ def get_season():
     return jsonify([_race_payload(r) for r in races])
 
 
+@app.route("/api/drivers/stats")
+def driver_stats():
+    """
+    Aggregated season stats per driver:
+      championship position, points, wins, podiums, top5, top10,
+      DNFs, fastest laps, recent form (last 6 race positions),
+      average qualifying gap to pole, teammate head-to-head.
+    """
+    standings      = api.get_driver_standings()
+    season_results = api.get_season_results()
+    season_qual    = api.get_season_qualifying()  # newest-first
+
+    # ── Pre-index: race results by driver ─────────────────────────────────────
+    # Each entry: {"pos": int, "status": str, "round": str, "raceName": str, "fl_rank": str}
+    driver_races: dict = {}
+    for race in season_results:
+        rnd  = race.get("round", "?")
+        name = race.get("raceName", "?")
+        for r in race.get("Results", []):
+            did = r.get("Driver", {}).get("driverId", "")
+            if not did:
+                continue
+            status = r.get("status", "")
+            try:
+                pos = int(r.get("position", 20))
+            except ValueError:
+                pos = 20
+            is_dnf = any(x in status for x in
+                         ("DNF", "Retired", "Accident", "Engine",
+                          "Gearbox", "Hydraulics", "Electrical", "Collision"))
+            fl_rank = r.get("FastestLap", {}).get("rank", "")
+            driver_races.setdefault(did, []).append({
+                "round":    rnd,
+                "raceName": name,
+                "pos":      pos,
+                "status":   status,
+                "is_dnf":   is_dnf,
+                "fl_rank":  fl_rank,
+            })
+
+    # Sort each driver's races by round ascending (oldest first)
+    for did in driver_races:
+        driver_races[did].sort(key=lambda x: int(x["round"]) if x["round"].isdigit() else 0)
+
+    # ── Pre-index: qualifying data by driver ──────────────────────────────────
+    # Compute avg gap-to-pole across all qualifying sessions
+    driver_quali_gaps: dict = {}  # did → [gap_s, ...]
+    for race in season_qual:  # newest-first
+        qr = race.get("QualifyingResults", [])
+        if not qr:
+            continue
+        pole_t = None
+        for q in qr:
+            t = q.get("Q3") or q.get("Q2") or q.get("Q1", "")
+            s = api.parse_q_time(t)
+            if s is not None and (pole_t is None or s < pole_t):
+                pole_t = s
+        if pole_t is None:
+            continue
+        for q in qr:
+            did = q.get("Driver", {}).get("driverId", "")
+            t   = q.get("Q3") or q.get("Q2") or q.get("Q1", "")
+            s   = api.parse_q_time(t)
+            if did and s is not None:
+                driver_quali_gaps.setdefault(did, []).append(round(s - pole_t, 3))
+
+    # ── Teammate head-to-head quali: count sessions each beat the other ───────
+    # Build constructor → [driver_ids] map from standings
+    con_drivers: dict = {}
+    for s in standings:
+        con = s.get("Constructors", [{}])[0].get("constructorId", "unknown")
+        did = s.get("Driver", {}).get("driverId", "")
+        con_drivers.setdefault(con, []).append(did)
+
+    # For each qualifying session, compare teammates
+    teammate_wins: dict = {}  # did → int (sessions beating teammate)
+    teammate_total: dict = {}
+    for race in season_qual:
+        qr = race.get("QualifyingResults", [])
+        # Build: did → best time in seconds
+        session_times: dict = {}
+        for q in qr:
+            did = q.get("Driver", {}).get("driverId", "")
+            t   = q.get("Q3") or q.get("Q2") or q.get("Q1", "")
+            s   = api.parse_q_time(t)
+            if did and s is not None:
+                session_times[did] = s
+        # Compare within each constructor
+        for con, dids in con_drivers.items():
+            if len(dids) < 2:
+                continue
+            d1, d2 = dids[0], dids[1]
+            t1, t2 = session_times.get(d1), session_times.get(d2)
+            if t1 is not None and t2 is not None:
+                teammate_total[d1] = teammate_total.get(d1, 0) + 1
+                teammate_total[d2] = teammate_total.get(d2, 0) + 1
+                if t1 < t2:
+                    teammate_wins[d1] = teammate_wins.get(d1, 0) + 1
+                else:
+                    teammate_wins[d2] = teammate_wins.get(d2, 0) + 1
+
+    # ── Assemble result per driver ─────────────────────────────────────────────
+    result = []
+    for s in standings:
+        d   = s.get("Driver", {})
+        did = d.get("driverId", "")
+        con = s.get("Constructors", [{}])[0].get("constructorId", "unknown")
+
+        races = driver_races.get(did, [])
+        wins     = int(s.get("wins", 0))
+        podiums  = sum(1 for r in races if not r["is_dnf"] and r["pos"] <= 3)
+        top5     = sum(1 for r in races if not r["is_dnf"] and r["pos"] <= 5)
+        top10    = sum(1 for r in races if not r["is_dnf"] and r["pos"] <= 10)
+        dnfs     = sum(1 for r in races if r["is_dnf"])
+        fl_count = sum(1 for r in races if str(r.get("fl_rank")) == "1")
+        races_started = len(races)
+
+        # Recent form: last 6 race positions
+        recent = [{"pos": r["pos"], "is_dnf": r["is_dnf"],
+                   "round": r["round"], "raceName": r["raceName"]}
+                  for r in races[-6:]]
+
+        # Avg qualifying gap to pole
+        gaps = driver_quali_gaps.get(did, [])
+        avg_gap = round(sum(gaps) / len(gaps), 3) if gaps else None
+
+        # Teammate H2H
+        tm_wins  = teammate_wins.get(did, 0)
+        tm_total = teammate_total.get(did, 0)
+
+        result.append({
+            "driver_id":       did,
+            "name":            f"{d.get('givenName','')} {d.get('familyName','')}".strip(),
+            "code":            d.get("code", did[:3].upper()),
+            "number":          d.get("permanentNumber", ""),
+            "nationality":     d.get("nationality", ""),
+            "constructor_id":  con,
+            "championship_pos": int(s.get("position", 99)),
+            "championship_pts": float(s.get("points", 0)),
+            "wins":            wins,
+            "podiums":         podiums,
+            "top5":            top5,
+            "top10":           top10,
+            "dnfs":            dnfs,
+            "fastest_laps":    fl_count,
+            "races_started":   races_started,
+            "avg_quali_gap":   avg_gap,
+            "recent_form":     recent,
+            "teammate_h2h":    {"wins": tm_wins, "total": tm_total},
+            "race_history":    races,  # full list for expanded view
+        })
+
+    result.sort(key=lambda x: x["championship_pos"])
+    return jsonify(result)
+
+
 @app.route("/api/predict", methods=["POST"])
 def predict():
-    data = request.get_json(force=True)
+    data = request.get_json(force=True, silent=True) or {}
     round_num = str(data.get("round", "last"))
     if not _ROUND_RE.match(round_num):
         return jsonify({"error": "Invalid round parameter"}), 400
@@ -247,6 +408,7 @@ def predict():
     driver_standings      = api.get_driver_standings()
     constructor_standings = api.get_constructor_standings()
     season_results        = api.get_season_results()
+    season_qualifying     = api.get_season_qualifying()
 
     qualifying = api.get_qualifying(rnd=round_num)
     if not qualifying:
@@ -269,6 +431,7 @@ def predict():
         circuit_id=circuit_id,
         weather=weather,
         track=track,
+        season_qualifying=season_qualifying,
     )
 
     strategies = fac.compute_optimal_strategy(track, weather)
@@ -382,8 +545,11 @@ def predict():
 @app.route("/api/notify", methods=["POST"])
 def notify():
     """Push a pre-computed prediction summary to ntfy. Body: {"round": "6"}"""
-    data = request.get_json(force=True)
-    run_id = data.get("run_id")
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        run_id = int(data.get("run_id", 0)) or None
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "invalid run_id"}), 400
     if run_id:
         # Push from saved history
         with _db() as conn:
@@ -439,7 +605,7 @@ def live_predict():
     Re-run Monte Carlo from the current lap using live gaps as base_pace.
     Body: {"round": "8", "session_key": "9158"}
     """
-    data        = request.get_json(force=True)
+    data        = request.get_json(force=True, silent=True) or {}
     round_num   = str(data.get("round", "last"))
     session_key = str(data.get("session_key", "latest"))
     if not _ROUND_RE.match(round_num):
@@ -460,6 +626,7 @@ def live_predict():
     driver_standings      = api.get_driver_standings()
     constructor_standings = api.get_constructor_standings()
     season_results        = api.get_season_results()
+    season_qualifying     = api.get_season_qualifying()
     qualifying            = api.get_qualifying(rnd=round_num)
     circuit_history       = api.get_circuit_history(circuit_id, seasons=5)
     track                 = get_track(circuit_id)
@@ -477,6 +644,7 @@ def live_predict():
         circuit_id=circuit_id,
         weather=weather,
         track=track,
+        season_qualifying=season_qualifying,
     )
 
     # ── Apply live overrides ──────────────────────────────────────────────────
@@ -573,6 +741,7 @@ def get_history():
                    circuit, country, n_sims, pace_source, top5_json
             FROM predictions
             ORDER BY id DESC
+            LIMIT 100
         """).fetchall()
     result = []
     for r in rows:
@@ -623,6 +792,117 @@ def delete_history_run(run_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/laptimes")
+def lap_times():
+    """Qualifying + fastest lap data for a given round, plus season poles."""
+    round_num = str(request.args.get("round", "last"))
+    year      = str(request.args.get("year",  "current"))
+    if not _ROUND_RE.match(round_num):
+        return jsonify({"error": "Invalid round parameter"}), 400
+    if not _YEAR_RE.match(year):
+        return jsonify({"error": "Invalid year parameter"}), 400
+
+    JOLP = api.JOLPICA
+
+    # Qualifying results for this round
+    d_qual  = api._get(f"{JOLP}/{year}/{round_num}/qualifying.json")
+    races_q = (d_qual or {}).get("MRData", {}).get("RaceTable", {}).get("Races", [])
+    qual_r  = races_q[0].get("QualifyingResults", []) if races_q else []
+    race_info = {}
+    if races_q:
+        r0 = races_q[0]
+        race_info = {
+            "raceName":  r0.get("raceName"),
+            "round":     r0.get("round"),
+            "date":      r0.get("date"),
+            "circuitId": r0.get("Circuit", {}).get("circuitId"),
+            "circuit":   r0.get("Circuit", {}).get("circuitName"),
+            "country":   r0.get("Circuit", {}).get("Location", {}).get("country"),
+        }
+
+    # Race results for fastest laps
+    d_race  = api._get(f"{JOLP}/{year}/{round_num}/results.json")
+    races_r = (d_race or {}).get("MRData", {}).get("RaceTable", {}).get("Races", [])
+    race_r  = races_r[0].get("Results", []) if races_r else []
+
+    # All qualifying results for season poles timeline
+    d_sq   = api._get(f"{JOLP}/{year}/qualifying.json?limit=500")
+    all_q  = (d_sq or {}).get("MRData", {}).get("RaceTable", {}).get("Races", [])
+
+    def _fmt_qual(row):
+        q1 = row.get("Q1", "")
+        q2 = row.get("Q2", "")
+        q3 = row.get("Q3", "")
+        best = q3 or q2 or q1
+        return {
+            "position":  row.get("position"),
+            "driver":    row.get("Driver", {}).get("code", ""),
+            "driver_id": row.get("Driver", {}).get("driverId", ""),
+            "name":      (row.get("Driver", {}).get("givenName", "") + " " +
+                          row.get("Driver", {}).get("familyName", "")).strip(),
+            "team":      row.get("Constructor", {}).get("constructorId", ""),
+            "team_name": row.get("Constructor", {}).get("name", ""),
+            "Q1": q1, "Q2": q2, "Q3": q3,
+            "best": best,
+            "best_s": api.parse_q_time(best),
+            "Q1_s":   api.parse_q_time(q1),
+            "Q2_s":   api.parse_q_time(q2),
+            "Q3_s":   api.parse_q_time(q3),
+        }
+
+    qualifying = [_fmt_qual(r) for r in qual_r]
+
+    fastest_laps = []
+    for r in race_r:
+        fl = r.get("FastestLap", {})
+        t  = fl.get("Time", {}).get("time", "")
+        fastest_laps.append({
+            "race_pos":  r.get("position"),
+            "driver":    r.get("Driver", {}).get("code", ""),
+            "driver_id": r.get("Driver", {}).get("driverId", ""),
+            "name":      (r.get("Driver", {}).get("givenName", "") + " " +
+                          r.get("Driver", {}).get("familyName", "")).strip(),
+            "team":      r.get("Constructor", {}).get("constructorId", ""),
+            "fl_rank":   fl.get("rank", ""),
+            "fl_lap":    fl.get("lap", ""),
+            "fl_time":   t,
+            "fl_time_s": api.parse_q_time(t),
+            "fl_speed":  fl.get("AverageSpeed", {}).get("speed", ""),
+        })
+    fastest_laps.sort(key=lambda x: x["fl_time_s"] or 999)
+
+    season_poles = []
+    for r in all_q:
+        qr = r.get("QualifyingResults", [])
+        if not qr:
+            continue
+        pole = qr[0]
+        q3   = pole.get("Q3") or pole.get("Q2") or pole.get("Q1", "")
+        season_poles.append({
+            "round":     r.get("round"),
+            "raceName":  r.get("raceName"),
+            "date":      r.get("date"),
+            "circuitId": r.get("Circuit", {}).get("circuitId"),
+            "driver":    pole.get("Driver", {}).get("code", ""),
+            "driver_id": pole.get("Driver", {}).get("driverId", ""),
+            "name":      (pole.get("Driver", {}).get("givenName", "") + " " +
+                          pole.get("Driver", {}).get("familyName", "")).strip(),
+            "team":      pole.get("Constructor", {}).get("constructorId", ""),
+            "time":      q3,
+            "time_s":    api.parse_q_time(q3),
+        })
+    season_poles.sort(key=lambda x: int(x["round"] or 999))
+
+    return jsonify({
+        "race":         race_info,
+        "qualifying":   qualifying,
+        "fastest_laps": fastest_laps,
+        "season_poles": season_poles,
+    })
+
+
 if __name__ == "__main__":
-    print("  F1 Predictor UI → http://localhost:5050")
-    app.run(host="127.0.0.1", port=5050, debug=False)
+    port = int(os.environ.get("PORT", 5050))
+    host = "0.0.0.0" if os.environ.get("RENDER") else "127.0.0.1"
+    print(f"  F1 Predictor UI → http://{host}:{port}")
+    app.run(host=host, port=port, debug=False)

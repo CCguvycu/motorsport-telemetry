@@ -76,7 +76,9 @@ def show(
 
     # Predicted finish order
     out.append(_box("PREDICTED FINISH ORDER"))
-    data_label = "qualifying data" if pace_source == "qualifying" else "championship standings"
+    data_label = ("qualifying data" if pace_source == "qualifying"
+                  else "qualifying form" if pace_source == "quali_form"
+                  else "championship standings")
     out.append(f"  Based on: {data_label}  |  Monte Carlo: {n_sims:,} simulations")
     out.append("")
 
@@ -152,7 +154,9 @@ def show(
                f"{'TireMgt':>8} {'Wet':>5} {'Affinity':>9}")
     out.append("  " + _rule("─")[:-2])
     for r in results[:10]:
-        src_s = "QUALI" if r["pace_source"] == "qualifying" else "CHAMP"
+        src_s = ("QUALI" if r["pace_source"] == "qualifying"
+                  else "Q·FORM" if r["pace_source"] == "quali_form"
+                  else "CHAMP")
         out.append(
             f"  {r['name'][:21]:<22} {src_s:<14}"
             f" {_pct(r['form']):>6}"
