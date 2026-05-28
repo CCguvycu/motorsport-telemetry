@@ -2103,26 +2103,15 @@
     <div class="panel" id="resultsPanel">
       <div class="panel-header" style="justify-content:space-between">
         <div style="display:flex;align-items:center;gap:8px"><div class="dot"></div>PREDICTED FINISH ORDER</div>
-        <div style="display:flex;gap:6px;align-items:center">
-          <button id="shareBtn" onclick="toggleSharePanel()"
-            title="Share prediction"
-            style="background:var(--border);border:1px solid var(--border);color:var(--muted);
-                   cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;padding:3px 10px;
-                   border-radius:3px;transition:all .15s;width:auto"
-            onmouseover="this.style.background='#ff0050';this.style.color='#fff';this.style.borderColor='#ff0050'"
-            onmouseout="this.style.background='var(--border)';this.style.color='var(--muted)';this.style.borderColor='var(--border)'">
-            &#128248; SHARE
-          </button>
-          <button id="exportBtn" onclick="exportPrediction()"
-            title="Export as PNG"
-            style="background:var(--border);border:1px solid var(--border);color:var(--muted);
-                   cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;padding:3px 10px;
-                   border-radius:3px;transition:all .15s;width:auto"
-            onmouseover="this.style.background='var(--accent)';this.style.color='#fff';this.style.borderColor='var(--accent)'"
-            onmouseout="this.style.background='var(--border)';this.style.color='var(--muted)';this.style.borderColor='var(--border)'">
-            &#128247; EXPORT
-          </button>
-        </div>
+        <button id="exportBtn" onclick="exportPrediction()"
+          title="Export as PNG"
+          style="display:none;background:var(--border);border:1px solid var(--border);color:var(--muted);
+                 cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;padding:3px 10px;
+                 border-radius:3px;transition:all .15s;width:auto"
+          onmouseover="this.style.background='var(--accent)';this.style.color='#fff';this.style.borderColor='var(--accent)'"
+          onmouseout="this.style.background='var(--border)';this.style.color='var(--muted)';this.style.borderColor='var(--border)'">
+          &#128247; EXPORT
+        </button>
       </div>
       <div id="resultsContent">
         <div class="placeholder">
@@ -2132,6 +2121,17 @@
         </div>
       </div>
     </div>
+
+    <!-- Share trigger — always visible once page loads -->
+    <button id="shareBtn" onclick="toggleSharePanel()"
+      style="width:100%;padding:13px;background:#ff0050;border:1px solid #ff0050;color:#fff;
+             cursor:pointer;font-family:inherit;font-size:12px;font-weight:700;letter-spacing:2px;
+             border-radius:4px;transition:all .15s"
+      onmouseover="this.style.background='#cc003f';this.style.borderColor='#cc003f'"
+      onmouseout="this.style.background='#ff0050';this.style.borderColor='#ff0050'">
+      &#128248; SHARE PREDICTION ON TIKTOK / TWITTER
+    </button>
+
     <div class="panel" id="sharePanel" style="display:none">
       <div class="panel-header" style="justify-content:space-between">
         <div style="display:flex;align-items:center;gap:8px"><div class="dot" style="background:#ff0050"></div>SHARE PREDICTION</div>
@@ -2682,8 +2682,6 @@ function renderAll(d, isLive) {
   // Show export + share buttons once we have results
   const exportBtn = document.getElementById('exportBtn');
   if (exportBtn && d.results && d.results.length) exportBtn.style.display = '';
-  const shareBtn = document.getElementById('shareBtn');
-  if (shareBtn && d.results && d.results.length) shareBtn.style.display = '';
 }
 
 function renderLiveBar(d) {
@@ -3712,9 +3710,8 @@ renderAll = function(d, isLive) {
   _lastRaceName = (d.race && d.race.name) ? d.race.name : '';
   _lastRace     = d.race || {};
   _lastNSims    = d.n_sims || 0;
-  document.getElementById('shareBtn').style.display = '';
   document.getElementById('sharePanel').style.display = 'none';
-  document.getElementById('shareCaptionText').value = buildCaption();
+  try { document.getElementById('shareCaptionText').value = buildCaption(); } catch(e) {}
   if (!isLive) {
     document.getElementById('feedPanel').style.display = '';
   }
