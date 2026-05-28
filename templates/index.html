@@ -2103,15 +2103,26 @@
     <div class="panel" id="resultsPanel">
       <div class="panel-header" style="justify-content:space-between">
         <div style="display:flex;align-items:center;gap:8px"><div class="dot"></div>PREDICTED FINISH ORDER</div>
-        <button id="exportBtn" onclick="exportPrediction()"
-          title="Export as PNG"
-          style="display:none;background:var(--border);border:1px solid var(--border);color:var(--muted);
-                 cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;padding:3px 10px;
-                 border-radius:3px;transition:all .15s"
-          onmouseover="this.style.background='var(--accent)';this.style.color='#fff';this.style.borderColor='var(--accent)'"
-          onmouseout="this.style.background='var(--border)';this.style.color='var(--muted)';this.style.borderColor='var(--border)'">
-          &#128247; EXPORT
-        </button>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button id="shareBtn" onclick="toggleSharePanel()"
+            title="Share prediction"
+            style="display:none;background:var(--border);border:1px solid var(--border);color:var(--muted);
+                   cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;padding:3px 10px;
+                   border-radius:3px;transition:all .15s"
+            onmouseover="this.style.background='#ff0050';this.style.color='#fff';this.style.borderColor='#ff0050'"
+            onmouseout="this.style.background='var(--border)';this.style.color='var(--muted)';this.style.borderColor='var(--border)'">
+            &#128248; SHARE
+          </button>
+          <button id="exportBtn" onclick="exportPrediction()"
+            title="Export as PNG"
+            style="display:none;background:var(--border);border:1px solid var(--border);color:var(--muted);
+                   cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;padding:3px 10px;
+                   border-radius:3px;transition:all .15s"
+            onmouseover="this.style.background='var(--accent)';this.style.color='#fff';this.style.borderColor='var(--accent)'"
+            onmouseout="this.style.background='var(--border)';this.style.color='var(--muted)';this.style.borderColor='var(--border)'">
+            &#128247; EXPORT
+          </button>
+        </div>
       </div>
       <div id="resultsContent">
         <div class="placeholder">
@@ -2119,6 +2130,45 @@
           <div class="placeholder-text">Select a race and run simulation</div>
           <div class="placeholder-sub">5,000 Monte Carlo iterations per run</div>
         </div>
+      </div>
+    </div>
+    <div class="panel" id="sharePanel" style="display:none">
+      <div class="panel-header" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:8px"><div class="dot" style="background:#ff0050"></div>SHARE PREDICTION</div>
+        <button onclick="toggleSharePanel()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;line-height:1">✕</button>
+      </div>
+      <div class="panel-body" style="display:flex;flex-direction:column;gap:12px">
+        <textarea id="shareCaptionText"
+          style="width:100%;min-height:180px;background:var(--surface2);border:1px solid var(--border);
+                 color:var(--text);font-family:inherit;font-size:12px;line-height:1.6;padding:12px;
+                 border-radius:4px;resize:vertical;box-sizing:border-box;outline:none"
+          spellcheck="false"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="copyCaption()"
+            id="copyBtn"
+            style="flex:1;min-width:120px;background:var(--border);border:1px solid var(--border);color:var(--text);
+                   cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;padding:8px 14px;
+                   border-radius:4px;transition:all .15s">
+            📋 COPY CAPTION
+          </button>
+          <button onclick="shareToTwitter()"
+            style="flex:1;min-width:120px;background:#000;border:1px solid #333;color:#fff;
+                   cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;padding:8px 14px;
+                   border-radius:4px;transition:all .15s"
+            onmouseover="this.style.borderColor='#fff'"
+            onmouseout="this.style.borderColor='#333'">
+            𝕏 POST TO X
+          </button>
+          <button onclick="openTikTok()"
+            style="flex:1;min-width:120px;background:#ff0050;border:1px solid #ff0050;color:#fff;
+                   cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;padding:8px 14px;
+                   border-radius:4px;transition:all .15s"
+            onmouseover="this.style.background='#cc0040';this.style.borderColor='#cc0040'"
+            onmouseout="this.style.background='#ff0050';this.style.borderColor='#ff0050'">
+            🎵 OPEN TIKTOK
+          </button>
+        </div>
+        <div id="copyConfirm" style="display:none;font-size:11px;color:#4caf50;letter-spacing:.5px">✓ Caption copied to clipboard</div>
       </div>
     </div>
     <div class="panel" id="stratPanel" style="display:none">
@@ -3574,12 +3624,95 @@ runLivePredict = async function() {
   }
 };
 
+// ── Share / TikTok caption ────────────────────────────────────────────────────
+let _lastRace = {};
+
+function buildCaption() {
+  const results = _lastResults;
+  const weather = _lastWeather;
+  const track   = _lastTrack;
+  const race    = _lastRace;
+  if (!results || !results.length) return '';
+
+  const p1 = results[0], p2 = results[1], p3 = results[2];
+  const rnd      = race.round || '?';
+  const country  = track.country || race.name || '';
+  const rainPct  = Math.round((weather.rain_prob || 0) * 100);
+  const scPct    = Math.round((track.sc_prob || 0.4) * 100);
+
+  const verstappen = results.find(r => (r.driver_id||'').toLowerCase().includes('verstappen'));
+  const vMaxDnf  = verstappen && (verstappen.dnf_sim_rate || 0) > 0.2;
+  const rainRace = rainPct >= 40;
+  const scChaos  = scPct >= 60;
+  const midfield = results.slice(0,5).some(r => (r.championship_pos||99) > 8 && (r.win_prob||0) > 0.05);
+
+  let hook;
+  if      (rainRace)                      hook = `Rain flips the grid at ${country}? AI says... 🌧️`;
+  else if (vMaxDnf)                       hook = `Verstappen DNF risk at ${country}? 👀 The data is ruthless`;
+  else if (midfield)                      hook = `Midfield shock incoming at R${rnd}? 🤖 AI spotted it`;
+  else if (scChaos)                       hook = `Safety car chaos likely at ${(track.name||'').slice(0,20)} 🚨 Who benefits?`;
+  else if ((p1.win_prob||0) > 0.45)       hook = `Is ${p1.name.split(' ').pop()} just unbeatable right now? 📊 AI thinks so`;
+  else                                    hook = `Our AI model called R${rnd} — ${p1.name.split(' ').pop()} on top 🏆`;
+
+  const fmt = p => `${(p.win_prob*100).toFixed(0)}%`;
+  let body = `P1 ${p1.name} — ${fmt(p1)} win prob\nP2 ${p2.name} — ${fmt(p2)}\nP3 ${p3.name} — ${fmt(p3)}`;
+
+  if (rainRace) {
+    body += `\n\n${rainPct}% rain. Wet weather specialists rise. Wet race could shuffle everything.`;
+  } else if (vMaxDnf && verstappen) {
+    const vPos = results.findIndex(r => (r.driver_id||'').toLowerCase().includes('verstappen')) + 1;
+    body += `\n\nVerstappen P${vPos} expected — but ${Math.round(verstappen.dnf_sim_rate*100)}% DNF rate. Data doesn't do loyalty.`;
+  } else if (scChaos) {
+    body += `\n\n${scPct}% safety car probability. Strategy calls this one, not pace.`;
+  } else if (midfield) {
+    const surprise = results.slice(0,5).find(r => (r.championship_pos||99) > 8);
+    if (surprise) body += `\n\n${surprise.name.split(' ').pop()} in the mix? ${fmt(surprise)} win prob. AI doesn't follow the narrative.`;
+  }
+
+  const gpTag = '#' + (race.name||'').replace(/[\s-]/g,'');
+  const hashtags = `#F1 #FormulaOne ${gpTag} #MachineLearning #DataScience #F1Predictions #BuildInPublic #AI`;
+  return `${hook}\n\n${body}\n\n${hashtags}`;
+}
+
+function toggleSharePanel() {
+  const panel = document.getElementById('sharePanel');
+  const open  = panel.style.display === '';
+  panel.style.display = open ? 'none' : '';
+  if (!open) {
+    document.getElementById('shareCaptionText').value = buildCaption();
+    document.getElementById('copyConfirm').style.display = 'none';
+  }
+}
+
+function copyCaption() {
+  const text = document.getElementById('shareCaptionText').value;
+  navigator.clipboard.writeText(text).then(() => {
+    const el = document.getElementById('copyConfirm');
+    el.style.display = '';
+    setTimeout(() => { el.style.display = 'none'; }, 2500);
+  });
+}
+
+function shareToTwitter() {
+  const text = encodeURIComponent(document.getElementById('shareCaptionText').value);
+  window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank');
+}
+
+function openTikTok() {
+  copyCaption();
+  window.open('https://www.tiktok.com/upload', '_blank');
+}
+
 // ── Wire renderAll to show feed panel and update video pre-fill ──────────────
 const _origRenderAllInner = renderAll;
 renderAll = function(d, isLive) {
   _origRenderAllInner(d, isLive);
   _lastRaceName = (d.race && d.race.name) ? d.race.name : '';
+  _lastRace     = d.race || {};
   _lastNSims    = d.n_sims || 0;
+  document.getElementById('shareBtn').style.display = '';
+  document.getElementById('sharePanel').style.display = 'none';
+  document.getElementById('shareCaptionText').value = buildCaption();
   if (!isLive) {
     document.getElementById('feedPanel').style.display = '';
   }
