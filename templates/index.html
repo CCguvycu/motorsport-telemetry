@@ -2679,9 +2679,11 @@ function renderAll(d, isLive) {
   if (isLive) renderLiveBar(d);
   renderRaceWidget(d, !!isLive);
   requestAnimationFrame(() => requestAnimationFrame(animateBars));
-  // Show export button once we have results
+  // Show export + share buttons once we have results
   const exportBtn = document.getElementById('exportBtn');
   if (exportBtn && d.results && d.results.length) exportBtn.style.display = '';
+  const shareBtn = document.getElementById('shareBtn');
+  if (shareBtn && d.results && d.results.length) shareBtn.style.display = '';
 }
 
 function renderLiveBar(d) {
